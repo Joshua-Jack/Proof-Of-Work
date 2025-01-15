@@ -6,12 +6,12 @@ import {ImplData, IImplRecords} from "../interfaces/IImpl.sol";
 import {IVaultRecords} from "../interfaces/IVaultRecords.sol";
 import {IVaultDepolymentController} from "../interfaces/IVaultDepolymentController.sol";
 
-/// @title VaultManager
+/// @title VaultController
 /// @author Momint
 /// @notice Controller contract for managing vault lifecycle and configurations
 /// @dev Implements OpenZeppelin's AccessControl for role-based permissions
 ///      Manages vault deployments, implementations, and operational controls
-contract VaultManager is AccessControl {
+contract VaultController is AccessControl {
     /// @notice Role identifier for vault controller permissions
     /// @dev Calculated as keccak256("VAULT_CONTROLLER")
     bytes32 public constant VAULT_CONTROLLER_ROLE =
