@@ -70,7 +70,7 @@ contract ERC1155RWA is
         _grantRole(PAUSER_ROLE, admin);
         _grantRole(ROYALTY_ROLE, admin);
 
-        _nextTokenId = 0;
+        _nextTokenId = 1;
     }
 
     function mint(

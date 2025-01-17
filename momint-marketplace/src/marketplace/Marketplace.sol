@@ -5,6 +5,8 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "../assets/ERC1155RWA.sol";
 
 /**
@@ -14,7 +16,9 @@ import "../assets/ERC1155RWA.sol";
 contract Marketplace is
     Initializable,
     OwnableUpgradeable,
-    ReentrancyGuardUpgradeable
+    ReentrancyGuardUpgradeable,
+    ERC1155Holder,
+    PausableUpgradeable
 {
     // State variables
     ERC1155RWA public rwaToken;
@@ -60,6 +64,7 @@ contract Marketplace is
     );
     event ProtocolFeePaid(uint256 indexed listingId, uint256 amount);
     event EmergencyToggled(bool stopped);
+    event TokenAcceptanceUpdated(address indexed token, bool accepted);
 
     // Custom errors
     error InsufficientPayment(uint256 expected, uint256 received);
@@ -88,11 +93,12 @@ contract Marketplace is
 
         __Ownable_init(msg.sender);
         __ReentrancyGuard_init();
+        __Pausable_init();
 
         rwaToken = ERC1155RWA(_rwaToken);
         feeRecipient = _feeRecipient;
         protocolFee = _protocolFee;
-        _nextListingId = 0;
+        _nextListingId = 1;
     }
 
     // Admin functions
@@ -109,6 +115,7 @@ contract Marketplace is
     function setAcceptedToken(address token, bool accepted) external onlyOwner {
         if (token == address(0)) revert InvalidToken();
         acceptedTokens[token] = accepted;
+        emit TokenAcceptanceUpdated(token, accepted);
     }
 
     function toggleEmergencyStop() external onlyOwner {
@@ -122,7 +129,7 @@ contract Marketplace is
         uint256 amount,
         uint256 pricePerToken,
         address paymentToken
-    ) external returns (uint256) {
+    ) external whenNotPaused returns (uint256) {
         if (emergencyStop) revert EmergencyStopActive();
         if (amount == 0) revert InvalidAmount();
         if (pricePerToken == 0) revert InvalidAmount();
@@ -166,7 +173,7 @@ contract Marketplace is
         return listingId;
     }
 
-    function cancelListing(uint256 listingId) external {
+    function cancelListing(uint256 listingId) external whenNotPaused {
         if (emergencyStop) revert EmergencyStopActive();
 
         Listing storage listing = listings[listingId];
@@ -190,7 +197,7 @@ contract Marketplace is
     function buyTokens(
         uint256 listingId,
         uint256 amount
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         if (emergencyStop) revert EmergencyStopActive();
 
         Listing storage listing = listings[listingId];
@@ -226,7 +233,7 @@ contract Marketplace is
     function batchBuyTokens(
         uint256[] calldata listingIds,
         uint256[] calldata amounts
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         if (emergencyStop) revert EmergencyStopActive();
         if (listingIds.length != amounts.length) revert InvalidAmount();
 
@@ -347,5 +354,14 @@ contract Marketplace is
                 ""
             );
         }
+    }
+
+    // Add pause/unpause functions
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }
