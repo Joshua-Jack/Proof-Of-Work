@@ -1,14 +1,9 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import {ImplData} from "./IImpl.sol";
+// import {ImplData} from "./IImpl.sol";
 
 interface IVaultDepolymentController {
-    function addImplementation(
-        bytes32 id_,
-        ImplData calldata implementation_
-    ) external;
-
     function removeImplementation(bytes32 id_) external;
 
     function deployNewVault(

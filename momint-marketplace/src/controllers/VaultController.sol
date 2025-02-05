@@ -2,187 +2,228 @@
 pragma solidity 0.8.24;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {ImplData, IImplRecords} from "../interfaces/IImpl.sol";
-import {IVaultRecords} from "../interfaces/IVaultRecords.sol";
-import {IVaultDepolymentController} from "../interfaces/IVaultDepolymentController.sol";
+import {VaultStorage} from "../storage/VaultStorage.sol";
+import {ModuleStorage} from "../storage/ModuleStorage.sol";
+import {ContractStorage} from "../storage/ContractStorage.sol";
+import {MomintFactory} from "../factories/MomintFactory.sol";
+import {IMomintVault, Module, VaultFees} from "../interfaces/IMomintVault.sol";
+import {IModule} from "../interfaces/IModule.sol";
+import {SPModule} from "../modules/SPModule.sol";
+import {ContractData} from "../interfaces/IContractStorage.sol";
+import {MomintVault} from "../vault/MomintVault.sol";
 
-/// @title VaultController
-/// @author Momint
-/// @notice Controller contract for managing vault lifecycle and configurations
-/// @dev Implements OpenZeppelin's AccessControl for role-based permissions
-///      Manages vault deployments, implementations, and operational controls
 contract VaultController is AccessControl {
-    /// @notice Role identifier for vault controller permissions
-    /// @dev Calculated as keccak256("VAULT_CONTROLLER")
     bytes32 public constant VAULT_CONTROLLER_ROLE =
         keccak256("VAULT_CONTROLLER");
 
-    /// @notice Interface for tracking vault registrations
-    IVaultRecords public vaultRecords;
-    /// @notice Interface for controlling vault deployments
-    IVaultDepolymentController public deploymentController;
+    VaultStorage public vaultStorage;
+    ModuleStorage public moduleStorage;
+    ContractStorage public contractStorage;
+    MomintFactory public factory;
 
-    /// @notice Emitted when all vaults are paused simultaneously
-    event AllVaultsPaused();
-    /// @notice Emitted when all vaults are unpaused simultaneously
-    event AllVaultsUnpaused();
+    event VaultDeployed(
+        address indexed vault,
+        string name,
+        address asset,
+        bool isClone
+    );
+    event ModuleDeployed(
+        address indexed module,
+        address indexed vault,
+        string name,
+        bool isClone
+    );
+    event RegistriesSet(
+        address vaultStorage,
+        address moduleStorage,
+        address contractStorage,
+        address factory
+    );
 
-    /// @notice Initializes the contract with an admin address
-    /// @dev Grants both DEFAULT_ADMIN_ROLE and VAULT_CONTROLLER_ROLE to admin
-    /// @param admin Address to be granted admin privileges
-    /// @custom:throws "Invalid admin address" if admin is zero address
+    error UnauthorizedCaller();
+    error InvalidAddress();
+    error DeploymentFailed();
+    error InvalidImplementation();
+    error ContractNotFound();
+
     constructor(address admin) {
-        require(admin != address(0), "Invalid admin address");
+        if (admin == address(0)) revert UnauthorizedCaller();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(VAULT_CONTROLLER_ROLE, admin);
     }
 
-    /// @notice Configures the contract with necessary interface connections
-    /// @dev Can only be called by admin role
-    /// @param vaultRecords_ Address of the vault records contract
-    /// @param deploymentController_ Address of the deployment controller contract
-    function setup(
-        IVaultRecords vaultRecords_,
-        IVaultDepolymentController deploymentController_
+    function setRegistries(
+        address vaultStorage_,
+        address moduleStorage_,
+        address contractStorage_,
+        address factory_
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        vaultRecords = vaultRecords_;
-        deploymentController = deploymentController_;
+        if (
+            vaultStorage_ == address(0) ||
+            moduleStorage_ == address(0) ||
+            contractStorage_ == address(0) ||
+            factory_ == address(0)
+        ) revert InvalidAddress();
+
+        vaultStorage = VaultStorage(vaultStorage_);
+        moduleStorage = ModuleStorage(moduleStorage_);
+        contractStorage = ContractStorage(contractStorage_);
+        factory = MomintFactory(factory_);
+
+        emit RegistriesSet(
+            vaultStorage_,
+            moduleStorage_,
+            contractStorage_,
+            factory_
+        );
     }
 
-    /// @notice Pauses operations for a specific vault
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param vault_ Address of the vault to pause
-    function pauseVault(
-        address vault_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {}
-
-    /// @notice Unpauses operations for a specific vault
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param vault_ Address of the vault to unpause
-    function unpauseVault(
-        address vault_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {}
-
-    /// @notice Pauses all registered vaults simultaneously
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    function pauseAllVaults() external onlyRole(VAULT_CONTROLLER_ROLE) {
-        address[] memory vaults = vaultRecords.getAllVaults();
-        emit AllVaultsPaused();
-        uint256 vaultsLength = vaults.length;
-        // todo go through all vaults and pause them
-    }
-
-    /// @notice Unpauses all registered vaults simultaneously
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    function unpauseAllVaults() external onlyRole(VAULT_CONTROLLER_ROLE) {
-        emit AllVaultsUnpaused();
-        address[] memory vaults = vaultRecords.getAllVaults();
-        uint256 vaultsLength = vaults.length;
-        // todo go through all vaults and unpause them
-    }
-
-    /// @notice Deploys a new vault using specified implementation
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param id_ Implementation identifier
-    /// @param data_ Initialization data for the new vault
-    /// @return newVaultAddress Address of the newly deployed vault
     function deployNewVault(
-        bytes32 id_,
-        bytes calldata data_
-    )
-        external
-        onlyRole(VAULT_CONTROLLER_ROLE)
-        returns (address newVaultAddress)
-    {
-        newVaultAddress = deploymentController.deployNewVault(id_, data_);
-        vaultRecords.addVault(newVaultAddress, id_);
+        bytes32 implementationId,
+        string memory name,
+        address asset,
+        address admin,
+        address feeRecipient,
+        VaultFees memory fees,
+        bool useClone
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) returns (address newVault) {
+        ContractData memory implData = contractStorage.getContract(
+            implementationId
+        );
+        if (implData.contractAddress == address(0)) revert ContractNotFound();
+
+        // Prepare initialization data
+        bytes memory initData = abi.encodeWithSelector(
+            MomintVault.initialize.selector,
+            asset,
+            string(abi.encodePacked("mv", name)),
+            name,
+            admin,
+            feeRecipient,
+            fees
+        );
+
+        // Generate deterministic salt
+        bytes32 salt = keccak256(abi.encodePacked(name, block.timestamp));
+
+        MomintFactory.DeployConfig memory config = MomintFactory.DeployConfig({
+            implementation: implData.contractAddress,
+            initData: initData,
+            salt: salt,
+            deployType: useClone
+                ? MomintFactory.DeploymentType.CLONE
+                : MomintFactory.DeploymentType.DIRECT,
+            creationCode: useClone ? bytes("") : type(MomintVault).creationCode
+        });
+
+        try factory.deploy(config) returns (address vault) {
+            newVault = vault;
+        } catch {
+            revert DeploymentFailed();
+        }
+
+        // Store vault information
+        vaultStorage.storeVault(newVault, name, asset);
+
+        // Store contract information
+        bytes32 vaultId = keccak256(abi.encodePacked("VAULT", newVault));
+        contractStorage.addContract(
+            vaultId,
+            ContractData({contractAddress: newVault, initDataRequired: true})
+        );
+
+        emit VaultDeployed(newVault, name, asset, useClone);
+        return newVault;
     }
 
-    /// @notice Registers a new vault implementation
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param id_ Unique identifier for the implementation
-    /// @param implementation_ Implementation data including address and initialization requirements
-    function registerNewImpl(
-        bytes32 id_,
-        ImplData memory implementation_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
-        deploymentController.addImplementation(id_, implementation_);
+    function deployAndAddModule(
+        address vault,
+        address admin,
+        string calldata projectName,
+        uint256 pricePerShare,
+        uint256 totalShares,
+        string calldata uri,
+        bool useClone,
+        bytes32 moduleImplementationId // Add implementation ID parameter
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) returns (address moduleAddress) {
+        ContractData memory moduleImpl = contractStorage.getContract(
+            moduleImplementationId
+        );
+        if (moduleImpl.contractAddress == address(0))
+            revert InvalidImplementation();
+
+        uint256 nextProjectId = moduleStorage.currentProjectId() + 1;
+
+        bytes memory constructorArgs = abi.encode(
+            nextProjectId,
+            admin,
+            vault,
+            projectName,
+            pricePerShare,
+            totalShares,
+            uri
+        );
+
+        bytes32 salt = keccak256(
+            abi.encodePacked(projectName, block.timestamp, nextProjectId)
+        );
+
+        MomintFactory.DeployConfig memory config = MomintFactory.DeployConfig({
+            implementation: moduleImpl.contractAddress,
+            initData: constructorArgs,
+            salt: salt,
+            deployType: useClone
+                ? MomintFactory.DeploymentType.CLONE
+                : MomintFactory.DeploymentType.DIRECT,
+            creationCode: useClone ? bytes("") : type(SPModule).creationCode
+        });
+
+        try factory.deploy(config) returns (address module) {
+            moduleAddress = module;
+        } catch {
+            revert DeploymentFailed();
+        }
+
+        // Store module information
+        moduleStorage.storeModule(moduleAddress, projectName, vault);
+
+        // Store contract information
+        bytes32 moduleId = keccak256(abi.encodePacked("MODULE", moduleAddress));
+        contractStorage.addContract(
+            moduleId,
+            ContractData({
+                contractAddress: moduleAddress,
+                initDataRequired: false
+            })
+        );
+
+        // Add module to vault
+        Module memory newModule = Module({
+            module: IModule(moduleAddress),
+            isSingleProject: true,
+            active: true
+        });
+        IMomintVault(vault).addModule(newModule, false, 0);
+
+        emit ModuleDeployed(moduleAddress, vault, projectName, useClone);
+        return moduleAddress;
     }
 
-    /// @notice Removes a vault implementation from the registry
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param id_ Identifier of the implementation to remove
-    function removeImplementation(
-        bytes32 id_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
-        deploymentController.removeImplementation(id_);
+    function getVaultInfo(
+        address vault
+    ) external view returns (VaultStorage.VaultInfo memory) {
+        return vaultStorage.getVault(vault);
     }
 
-    /// @notice Removes a vault from the registry
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param vault_ Address of the vault to remove
-    /// @param vaultId_ Implementation identifier of the vault
-    function removeVault(
-        address vault_,
-        bytes32 vaultId_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
-        deploymentController.removeVault(vault_, vaultId_);
+    function getModuleInfo(
+        address module
+    ) external view returns (ModuleStorage.ModuleInfo memory) {
+        return moduleStorage.getModule(module);
     }
 
-    /// @notice Updates the fee configuration for a specific vault
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param vault_ Address of the target vault
-    /// @param fees_ Encoded fee configuration data
-    function setVaultFees(
-        address vault_,
-        bytes calldata fees_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
-        // todo set vault fees
-    }
-
-    /// @notice Updates the fee recipient for a specific vault
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param vault_ Address of the target vault
-    /// @param newRecipient_ Address of the new fee recipient
-    function setFeeRecipient(
-        address vault_,
-        address newRecipient_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
-        // todo set fee recipient
-    }
-
-    /// @notice Toggles the still state of a vault
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param vault_ Address of the vault to toggle
-    function toggleStillVault(
-        address vault_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
-        // todo toggle vault still
-    }
-
-    /// @notice Adds or updates a module in a vault
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param vault_ Address of the target vault
-    /// @param index_ Position of the module in the vault's module array
-    /// @param replace_ Whether to replace an existing module or add a new one
-    /// @param newModule_ Encoded module configuration data
-    function addUpdateModule(
-        address vault_,
-        uint256 index_,
-        bool replace_,
-        bytes calldata newModule_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
-        // todo add/update module
-    }
-
-    /// @notice Removes a module from a vault
-    /// @dev Only callable by accounts with VAULT_CONTROLLER_ROLE
-    /// @param vault_ Address of the target vault
-    /// @param index_ Position of the module to remove
-    function removeModule(
-        address vault_,
-        uint256 index_
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
-        // todo remove module
+    function getContractInfo(
+        bytes32 id
+    ) external view returns (ContractData memory) {
+        return contractStorage.getContract(id);
     }
 }

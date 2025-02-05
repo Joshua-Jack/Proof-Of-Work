@@ -3,12 +3,13 @@ pragma solidity 0.8.24;
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title UpgradableBeaconController
  * @notice The Upgradable Beacon Controller is responsible for holding the current logic contracts and upgrading the logic contracts.
  */
-contract UpgradableBeaconController is Initializable {
+contract UpgradableBeaconController is Initializable, ReentrancyGuard {
     /** @notice Store prior implementation addresses for each beacon. */
     mapping(string => address) private implementations;
 
@@ -53,7 +54,12 @@ contract UpgradableBeaconController is Initializable {
         string memory name_,
         address implementation_,
         address owner_
-    ) public isValidImplementation(implementation_) isValidName(name_) {
+    )
+        public
+        nonReentrant
+        isValidImplementation(implementation_)
+        isValidName(name_)
+    {
         UpgradeableBeacon beacon = new UpgradeableBeacon(
             implementation_,
             owner_
@@ -76,7 +82,7 @@ contract UpgradableBeaconController is Initializable {
     function upgrade(
         address newImplementation_,
         string memory name_
-    ) public isValidImplementation(newImplementation_) {
+    ) public isValidImplementation(newImplementation_) nonReentrant {
         UpgradeableBeacon beacon = UpgradeableBeacon(beacons[name_]);
         beacon.upgradeTo(newImplementation_);
         implementations[name_] = newImplementation_;

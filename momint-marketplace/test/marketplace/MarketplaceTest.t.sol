@@ -498,7 +498,6 @@ contract MarketplaceTest is Test {
             LISK_TOKEN,
             true
         );
-
         assertTrue(marketplace.acceptedTokens(LISK_TOKEN));
         console.log("");
         console.log(

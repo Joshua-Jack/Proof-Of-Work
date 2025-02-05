@@ -129,7 +129,7 @@ contract Marketplace is
         uint256 amount,
         uint256 pricePerToken,
         address paymentToken
-    ) external whenNotPaused returns (uint256) {
+    ) external whenNotPaused nonReentrant returns (uint256) {
         if (emergencyStop) revert EmergencyStopActive();
         if (amount == 0) revert InvalidAmount();
         if (pricePerToken == 0) revert InvalidAmount();
@@ -173,7 +173,9 @@ contract Marketplace is
         return listingId;
     }
 
-    function cancelListing(uint256 listingId) external whenNotPaused {
+    function cancelListing(
+        uint256 listingId
+    ) external whenNotPaused nonReentrant {
         if (emergencyStop) revert EmergencyStopActive();
 
         Listing storage listing = listings[listingId];
@@ -339,7 +341,7 @@ contract Marketplace is
         address token,
         uint256 tokenId,
         uint256 amount
-    ) external onlyOwner {
+    ) external onlyOwner nonReentrant {
         if (!emergencyStop) revert EmergencyStopActive();
 
         if (token == address(0)) {

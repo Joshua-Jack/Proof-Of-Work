@@ -6,5 +6,6 @@ sizes = true
 optimizer_runs = 999999
 max_test_rejects = 99999
 libs = ["lib"]
+via_ir = true
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
