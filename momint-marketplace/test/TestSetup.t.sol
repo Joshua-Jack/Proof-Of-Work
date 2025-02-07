@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 import {MomintVault} from "../src/vault/MomintVault.sol";
 import {Module, VaultFees} from "../src/interfaces/IMomintVault.sol";
-import {Test} from "forge-std/Test.sol";
+import {Test, stdError} from "forge-std/Test.sol";
 import {IModule} from "../src/interfaces/IModule.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SPModule} from "../src/modules/SPModule.sol";

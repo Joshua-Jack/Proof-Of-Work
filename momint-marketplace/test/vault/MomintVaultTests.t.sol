@@ -12,6 +12,9 @@ import {SPModule} from "../../src/modules/SPModule.sol";
 import {console} from "forge-std/console.sol";
 import "forge-std/StdStyle.sol";
 import {Styles} from "../utils/Styles.sol";
+import {InitParams} from "../../src/interfaces/IMomintVault.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
+import {stdError} from "forge-std/Test.sol";
 
 // MomintVaultTests.t.sol
 contract MomintVaultTests is TestSetup {
@@ -25,6 +28,13 @@ contract MomintVaultTests is TestSetup {
     string constant PROJECT_NAME = "Test Solar Project";
     Module public mockModule;
     error NoSharesOwned();
+    error InvalidAmount();
+    error InvalidInitialization();
+    error InvalidReceiver();
+    error InvalidFeeRecipient();
+    error InvalidAssetAddress();
+    error EnforcedPause();
+
     event SharesAllocated(
         address indexed user,
         uint256 indexed projectId,
@@ -587,6 +597,156 @@ contract MomintVaultTests is TestSetup {
         vm.startPrank(user1);
         vm.expectRevert("Insufficient liquidity");
         vault.withdraw(shares, user1);
+        vm.stopPrank();
+    }
+
+    // Add these to your existing contract
+    function _deployNewVault() internal returns (MomintVault) {
+        address implementation = address(new MomintVault());
+        address vaultNewAddress = Clones.clone(implementation);
+        return MomintVault(vaultNewAddress);
+    }
+
+    function _getDefaultInitParams() internal view returns (InitParams memory) {
+        return
+            InitParams({
+                baseAsset: USDT,
+                feeRecipient: feeRecipient,
+                owner: admin,
+                shareName: "Test Vault",
+                symbol: "TV",
+                fees: VaultFees({
+                    depositFee: 500,
+                    withdrawalFee: 100,
+                    protocolFee: 300
+                }),
+                liquidityHoldBP: 3000,
+                maxOwnerShareBP: 7000
+            });
+    }
+
+    function test_RevertWhen_InitializeWithZeroAsset() public {
+        MomintVault newVault = _deployNewVault();
+        InitParams memory params = _getDefaultInitParams();
+        params.baseAsset = IERC20(address(0));
+
+        vm.expectRevert(InvalidAssetAddress.selector);
+        newVault.initialize(params);
+    }
+
+    function test_RevertWhen_InitializeWithZeroFeeRecipient() public {
+        MomintVault newVault = _deployNewVault();
+        InitParams memory params = _getDefaultInitParams();
+        params.feeRecipient = address(0);
+
+        vm.expectRevert(InvalidFeeRecipient.selector);
+        newVault.initialize(params);
+    }
+
+    function test_RevertWhen_InitializeWithLowLiquidityRatio() public {
+        MomintVault newVault = _deployNewVault();
+        InitParams memory params = _getDefaultInitParams();
+        params.liquidityHoldBP = 500; // Below minimum
+
+        vm.expectRevert("Liquidity ratio too low");
+        newVault.initialize(params);
+    }
+
+    function test_RevertWhen_InitializeWithHighOwnerShare() public {
+        MomintVault newVault = _deployNewVault();
+        InitParams memory params = _getDefaultInitParams();
+        params.maxOwnerShareBP = 9500; // Above maximum
+
+        vm.expectRevert("Owner share too high");
+        newVault.initialize(params);
+    }
+
+    function test_RevertWhen_ReinitializingVault() public {
+        MomintVault newVault = _deployNewVault();
+        InitParams memory params = _getDefaultInitParams();
+
+        // First initialization
+        newVault.initialize(params);
+
+        // Attempt to reinitialize
+        vm.expectRevert(InvalidInitialization.selector);
+        newVault.initialize(params);
+    }
+
+    function test_RevertWhen_InitializeWithInvalidRatioConfig() public {
+        MomintVault newVault = _deployNewVault();
+        InitParams memory params = _getDefaultInitParams();
+        params.liquidityHoldBP = 5000;
+        params.maxOwnerShareBP = 6000;
+        // Total exceeds MAX_BASIS_POINTS (10000)
+
+        vm.expectRevert("Invalid ratio configuration");
+        newVault.initialize(params);
+    }
+
+    function test_RevertWhen_DepositZeroAmount() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        vm.expectRevert(InvalidAmount.selector);
+        vault.deposit(0, user1, 0);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_DepositToZeroAddress() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        vm.expectRevert(InvalidReceiver.selector);
+        vault.deposit(100e6, address(0), 0);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_DepositWithInvalidModuleIndex() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        vm.expectRevert(stdError.indexOOBError);
+        vault.deposit(100e6, user1, 999);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_DepositWhenPaused() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vault.pause();
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        vm.expectRevert(EnforcedPause.selector);
+        vault.deposit(100e6, user1, 0);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_DepositExceedingAvailableShares() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        uint256 maxShares = SPModule(address(singleProjectModule.module))
+            .getAvailableShares();
+        uint256 tooManyShares = maxShares + 1e6;
+        USDT.approve(address(vault), tooManyShares);
+
+        vm.expectRevert(InvalidAmount.selector);
+        vault.deposit(tooManyShares, user1, 0);
         vm.stopPrank();
     }
 

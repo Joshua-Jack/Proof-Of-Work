@@ -36,7 +36,6 @@ contract MomintVault is
     error InvalidAmount();
     error InvalidReceiver();
     error NoActiveModules();
-    error SharesMismatch();
     error ZeroAmount();
     error InsufficientBalance();
     error WithdrawalTooSmall();
