@@ -24,7 +24,7 @@ contract MomintVaultTests is TestSetup {
     string constant URI = "ipfs://metadata";
     string constant PROJECT_NAME = "Test Solar Project";
     Module public mockModule;
-
+    error NoSharesOwned();
     event SharesAllocated(
         address indexed user,
         uint256 indexed projectId,
@@ -111,6 +111,75 @@ contract MomintVaultTests is TestSetup {
         console.log("\nUpdated ratios:");
         console.log("- New min liquidity:", currentMinLiquidity);
         console.log("- New max owner:", currentMaxOwner);
+    }
+
+    function test_ReverttransferSharesAndClaim() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        singleProjectModule.isSingleProject = true;
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        vm.startPrank(user2);
+        USDT.approve(address(vault), 10e6);
+        uint256 shares = vault.deposit(10e6, user2, 0);
+        console.log("User2 initial shares:", shares);
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        console.log("Transferring USDT from user1 to admin...");
+        console.log("Initial user1 USDT balance:", USDT.balanceOf(user1));
+        USDT.transfer(admin, 100e6);
+        console.log("Final user1 USDT balance:", USDT.balanceOf(user1));
+        vm.stopPrank();
+
+        // Distribute returns
+        vm.startPrank(admin);
+        USDT.approve(address(vault), 10e6); // Distribute 1 USDT as returns
+        vault.distributeReturns(10e6, 0);
+        vm.stopPrank();
+
+        // Check initial balances
+        console.log("\nInitial state:");
+        console.log("User2 shares:", vault.balanceOf(user2));
+        console.log("User3 shares:", vault.balanceOf(user3));
+
+        // User2 transfers half their shares to user3
+        vm.startPrank(user2);
+        address shareToken = address(vault);
+        console.log("Share token address:", shareToken);
+
+        uint256 sharesToTransfer = shares / 2;
+        IERC20(shareToken).transfer(user3, sharesToTransfer);
+        console.log("\nAfter transfer:");
+        console.log("User2 shares:", vault.balanceOf(user2));
+        console.log("User3 shares:", vault.balanceOf(user3));
+        vm.stopPrank();
+
+        // Try to claim returns with both users
+        console.log("\nTrying to claim returns:");
+
+        vm.startPrank(user2);
+        try vault.claimReturns(0, 1) returns (uint256 amount) {
+            console.log("User2 claimed amount:", amount);
+        } catch Error(string memory reason) {
+            console.log("User2 claim failed:", reason);
+        }
+        vm.stopPrank();
+
+        vm.startPrank(user3);
+        vm.expectRevert(NoSharesOwned.selector);
+        try vault.claimReturns(0, 1) returns (uint256 amount) {
+            console.log("User3 claimed amount:", amount);
+        } catch Error(string memory reason) {
+            console.log("User3 claim failed:", reason);
+        }
+        vm.stopPrank();
+
+        // Check final USDT balances
+        console.log("\nFinal USDT balances:");
+        console.log("User2 USDT:", USDT.balanceOf(user2));
+        console.log("User3 USDT:", USDT.balanceOf(user3));
     }
 
     function test_ownerAllocation() public {
