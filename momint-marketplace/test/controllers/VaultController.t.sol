@@ -23,6 +23,7 @@ contract VaultControllerTest is Test {
 
     address public admin = address(0x1);
     address public user = address(0x2);
+    address public user2 = address(0x3);
     address public feeRecipient = address(0x3);
 
     bytes32 public constant VAULT_IMPLEMENTATION_ID =
@@ -75,7 +76,8 @@ contract VaultControllerTest is Test {
                 "Test Project",
                 5e6,
                 100,
-                "ipfs://metadata"
+                "ipfs://metadata",
+                user2
             )
         );
 

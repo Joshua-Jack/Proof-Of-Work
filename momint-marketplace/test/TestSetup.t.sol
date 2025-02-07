@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.so
 import "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 import {Global} from "./Global.t.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
+import {InitParams} from "../src/interfaces/IMomintVault.sol";
 
 contract TestSetup is Test, Global {
     MomintVault vault;
@@ -42,14 +43,21 @@ contract TestSetup is Test, Global {
         implementation = address(new MomintVault());
         vaultAddress = Clones.clone(implementation);
         vault = MomintVault(vaultAddress);
-        vault.initialize(
-            USDT,
-            "MV",
-            "Momint Vault",
-            admin,
-            feeRecipient,
-            VaultFees({depositFee: 500, withdrawalFee: 100, protocolFee: 300})
-        );
+        InitParams memory params = InitParams({
+            baseAsset: USDT,
+            symbol: "MV",
+            shareName: "Momint Vault",
+            owner: admin,
+            feeRecipient: feeRecipient,
+            fees: VaultFees({
+                depositFee: 500,
+                withdrawalFee: 100,
+                protocolFee: 300
+            }),
+            liquidityHoldBP: 3000, // 30%
+            maxOwnerShareBP: 7000 // 70%
+        });
+        vault.initialize(params);
         vm.makePersistent(vaultAddress);
     }
 
@@ -61,7 +69,8 @@ contract TestSetup is Test, Global {
             "Test Project",
             5e6,
             100,
-            "ipfs://metadata"
+            "ipfs://metadata",
+            user3
         );
         spModuleAddress = address(spModule);
         vm.makePersistent(spModuleAddress);
@@ -81,7 +90,8 @@ contract TestSetup is Test, Global {
                             "Test Project",
                             5e6,
                             100,
-                            "ipfs://metadata"
+                            "ipfs://metadata",
+                            user3
                         )
                     )
                 ),

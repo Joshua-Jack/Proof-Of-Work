@@ -13,6 +13,7 @@ interface IModule {
         uint256 totalShares;
         bool active;
         string tokenURI;
+        address owner;
     }
 
     struct SharePrice {
@@ -38,10 +39,6 @@ interface IModule {
 
     function getActiveProjectId() external view returns (uint256);
 
-    function getCheapestShares(
-        uint256 maxAssets
-    ) external view returns (SharePrice memory cheapestShares, bool hasShares);
-
     function nftContract() external view returns (IERC1155);
 
     function vault() external view returns (address);
@@ -57,19 +54,8 @@ interface IModule {
         address user
     ) external returns (uint256 amount);
 
-    // Project management
-    function addProject(
-        uint256 projectId,
-        string calldata name,
-        uint256 pricePerShare,
-        uint256 totalShares,
-        string calldata tokenURI
-    ) external;
-
     // Rewards
     function distributeRevenue(uint256 projectId, uint256 amount) external;
-
-    function getPendingRewards(address user) external view returns (uint256);
 
     function getUserReturns(address user) external view returns (uint256);
 
@@ -80,6 +66,8 @@ interface IModule {
     function getAvailableShares() external view returns (uint256);
 
     function getAllocatedShares() external view returns (uint256);
+
+    function getProjectInfo() external view returns (ProjectInfo memory);
 
     // Events
     event SharesAllocated(

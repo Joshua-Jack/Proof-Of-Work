@@ -1,6 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IModule} from "./IModule.sol";
 
 struct Module {
@@ -9,17 +10,36 @@ struct Module {
     bool isSingleProject;
 }
 
-struct Allocation {
-    uint256 index;
-    uint256 amount; // Represented in BPS of the amount of ETF that should go into strategy
-}
-
 ///@notice VaultFees are represented in BPS
 ///@dev all downstream math needs to be / 10_000 because 10_000 bps == 100%
 struct VaultFees {
     uint64 depositFee;
     uint64 withdrawalFee;
     uint64 protocolFee;
+}
+
+struct InitParams {
+    IERC20 baseAsset;
+    string symbol;
+    string shareName;
+    address owner;
+    address feeRecipient;
+    VaultFees fees;
+    uint16 liquidityHoldBP;
+    uint16 maxOwnerShareBP;
+}
+
+struct Epoch {
+    uint256 id;
+    uint256 amount;
+    uint256 pendingRewards;
+    mapping(address => bool) hasClaimed;
+}
+
+struct OwnerAllocation {
+    uint256 totalAmount;
+    uint256 releasedAmount;
+    uint256 lastReleaseTime;
 }
 
 interface IMomintVault {
@@ -36,7 +56,6 @@ interface IMomintVault {
     event ModuleAdded(address newModule);
     event ModuleRemoved(address oldModule);
     event DepositLimitSet(uint256 limit);
-    event ModuleAllocationsChanged(Allocation[] newAllocations);
     event WithdrawalQueueUpdated(address oldQueue, address newQueue);
     event Deposit(
         address indexed caller,

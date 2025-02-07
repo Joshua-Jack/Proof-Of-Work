@@ -72,7 +72,8 @@ contract SPModule is
         string memory name,
         uint256 pricePerShare,
         uint256 totalShares,
-        string memory uri_
+        string memory uri_,
+        address owner
     ) ERC1155(uri_) {
         _projectId = projectId_;
         _validateInitialization(
@@ -94,7 +95,8 @@ contract SPModule is
             allocatedShares: 0,
             totalShares: totalShares,
             active: true,
-            tokenURI: uri_
+            tokenURI: uri_,
+            owner: owner
         });
 
         emit ModuleInitialized(_projectId, admin, vault_);
@@ -159,16 +161,6 @@ contract SPModule is
         emit SharesMinted(address(this), _projectId, amount);
     }
 
-    function addProject(
-        uint256 projectId,
-        string calldata name,
-        uint256 pricePerShare,
-        uint256 totalShares,
-        string calldata tokenURI
-    ) external nonReentrant {
-        // Implementation
-    }
-
     function distributeRevenue(uint256 projectId, uint256 amount) external {
         if (projectId != _projectId) revert InvalidProjectId();
         if (amount == 0) revert InvalidAmount();
@@ -197,17 +189,6 @@ contract SPModule is
         return projectId;
     }
 
-    function getCheapestShares(
-        uint256 maxAssets
-    )
-        external
-        view
-        override
-        returns (SharePrice memory cheapestShares, bool hasShares)
-    {
-        return (cheapestShares, hasShares);
-    }
-
     function nftContract() external view override returns (IERC1155) {
         return IERC1155(address(this));
     }
@@ -216,10 +197,8 @@ contract SPModule is
         return vaults;
     }
 
-    function getPendingRewards(
-        address user
-    ) external view override returns (uint256) {
-        return 0;
+    function getProjectInfo() external view returns (ProjectInfo memory) {
+        return _project;
     }
 
     function getUserInvestment(
@@ -264,7 +243,8 @@ contract SPModule is
         string memory name,
         uint256 pricePerShare,
         uint256 totalShares,
-        string memory uri_
+        string memory uri_,
+        address owner
     ) internal {
         vaults = vault_;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -278,7 +258,8 @@ contract SPModule is
             allocatedShares: 0,
             totalShares: totalShares,
             active: true,
-            tokenURI: uri_
+            tokenURI: uri_,
+            owner: owner
         });
 
         _initialized = true;

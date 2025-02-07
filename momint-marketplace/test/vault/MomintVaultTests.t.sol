@@ -20,6 +20,7 @@ contract MomintVaultTests is TestSetup {
     uint256 constant PROJECT_ID = 1;
     uint256 constant PRICE_PER_SHARE = 1e18; // $1 in 18 decimals
     uint256 constant TOTAL_SHARES = 1000 * PRECISION;
+    uint256 constant MAX_BASIS_POINTS = 10000; // 100%
     string constant URI = "ipfs://metadata";
     string constant PROJECT_NAME = "Test Solar Project";
     Module public mockModule;
@@ -40,7 +41,13 @@ contract MomintVaultTests is TestSetup {
 
         // Make sure admin has necessary permissions
         vm.startPrank(admin);
-        // Any additional setup needed
+        // Initialize with default liquidity ratios
+        uint16 defaultLiquidityHoldBP = 3000; // 30%
+        uint16 defaultMaxOwnerShareBP = 7000; // 70%
+        vault.updateLiquidityRatios(
+            defaultLiquidityHoldBP,
+            defaultMaxOwnerShareBP
+        );
         vm.stopPrank();
     }
 
@@ -65,6 +72,86 @@ contract MomintVaultTests is TestSetup {
         assertEq(fees.withdrawalFee, 100, "Withdrawal Fee");
         assertEq(fees.protocolFee, 300, "Protocol Fee");
         console.log(Styles.h1("Protocol Fee: 300"));
+    }
+
+    function test_liquidityRatios() public {
+        console.log("\n=== Starting liquidity ratios test ===");
+
+        // Get initial ratios
+        (
+            uint16 currentMinLiquidity,
+            uint16 currentMaxOwner,
+            uint16 absoluteMinLiquidity,
+            uint16 absoluteMaxOwner
+        ) = vault.getLiquidityRatios();
+
+        console.log("Initial ratios:");
+        console.log("- Current min liquidity:", currentMinLiquidity);
+        console.log("- Current max owner:", currentMaxOwner);
+        console.log("- Absolute min liquidity:", absoluteMinLiquidity);
+        console.log("- Absolute max owner:", absoluteMaxOwner);
+
+        // Update ratios as admin
+        vm.startPrank(admin);
+        uint16 newMinLiquidity = 4000; // 40%
+        uint16 newMaxOwner = 6000; // 60%
+
+        vault.updateLiquidityRatios(newMinLiquidity, newMaxOwner);
+
+        // Verify new ratios
+        (currentMinLiquidity, currentMaxOwner, , ) = vault.getLiquidityRatios();
+        assertEq(
+            currentMinLiquidity,
+            newMinLiquidity,
+            "Min liquidity not updated"
+        );
+        assertEq(currentMaxOwner, newMaxOwner, "Max owner not updated");
+
+        vm.stopPrank();
+        console.log("\nUpdated ratios:");
+        console.log("- New min liquidity:", currentMinLiquidity);
+        console.log("- New max owner:", currentMaxOwner);
+    }
+
+    function test_ownerAllocation() public {
+        console.log("\n=== Starting owner allocation test ===");
+
+        // Setup
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        singleProjectModule.isSingleProject = true;
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        // User deposit
+        vm.startPrank(user1);
+        uint256 depositAmount = 100e6; // 100 USDT
+        USDT.approve(address(vault), depositAmount);
+        vault.deposit(depositAmount, user1, 0);
+        vm.stopPrank();
+
+        // Get project owner
+        address projectOwner = SPModule(address(singleProjectModule.module))
+            .getProjectInfo()
+            .owner;
+
+        console.log("\nProject owner details:");
+        console.log("- Address:", projectOwner);
+
+        // Fast forward time
+        vm.warp(block.timestamp + 7 days);
+
+        // Owner claims allocation
+        vm.startPrank(projectOwner);
+        uint256 balanceBefore = USDT.balanceOf(projectOwner);
+
+        vault.claimOwnerAllocation();
+
+        uint256 claimed = USDT.balanceOf(projectOwner) - balanceBefore;
+        console.log("\nOwner claim results:");
+        console.log("- Amount claimed:", claimed);
+
+        vm.stopPrank();
     }
 
     function test_deposit() public {
@@ -109,6 +196,16 @@ contract MomintVaultTests is TestSetup {
         uint256 depositAmount = 15e6;
         console.log("\nAttempting deposit of", depositAmount, "USDT");
 
+        // Calculate expected splits
+        uint256 expectedFee = (depositAmount * 500) / 10000; // 5% fee
+        uint256 netAmount = depositAmount - expectedFee;
+        uint256 expectedLiquidity = (netAmount * 3000) / 10000; // 30% liquidity
+        uint256 expectedOwner = (netAmount * 7000) / 10000; // 70% owner
+
+        console.log("Expected splits:");
+        console.log("- Fee:", expectedFee);
+        console.log("- Liquidity:", expectedLiquidity);
+        console.log("- Owner:", expectedOwner);
         uint256 shares = vault.deposit(depositAmount, user1, 0);
 
         console.log("\nDeposit results:");
@@ -383,6 +480,44 @@ contract MomintVaultTests is TestSetup {
         vm.expectRevert();
         vault.getModule(0);
 
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_InsufficientLiquidity() public {
+        // Setup
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        singleProjectModule.isSingleProject = true;
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        // User deposit
+        vm.startPrank(user1);
+        uint256 depositAmount = 100e6; // 100 USDT
+        USDT.approve(address(vault), depositAmount);
+        uint256 shares = vault.deposit(depositAmount, user1, 0);
+
+        // Simulate liquidity drain by transferring most USDT out of vault
+        // This simulates the vault investing funds elsewhere
+        vm.stopPrank();
+        vm.startPrank(address(vault));
+        uint256 vaultBalance = USDT.balanceOf(address(vault));
+        uint256 drainAmount = (vaultBalance * 95) / 100; // Leave only 5% liquidity
+        USDT.transfer(address(0x1), drainAmount);
+        vm.stopPrank();
+
+        // Calculate buffer requirement
+        uint256 totalAssets = vault.totalAssets();
+        uint256 bufferRequired = (totalAssets * vault.BUFFER_THRESHOLD_BP()) /
+            MAX_BASIS_POINTS;
+        console.log("Total Assets:", totalAssets);
+        console.log("Buffer Required:", bufferRequired);
+        console.log("Vault Balance:", USDT.balanceOf(address(vault)));
+
+        // Try to withdraw - should revert due to insufficient liquidity
+        vm.startPrank(user1);
+        vm.expectRevert("Insufficient liquidity");
+        vault.withdraw(shares, user1);
         vm.stopPrank();
     }
 

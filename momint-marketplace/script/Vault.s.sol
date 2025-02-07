@@ -51,7 +51,8 @@ contract VaultScript is Script {
             "", // This will be overridden in actual deployments
             0, // This will be overridden in actual deployments
             0, // This will be overridden in actual deployments
-            "" // This will be overridden in actual deployments
+            "", // This will be overridden in actual deployments
+            address(0)
         );
 
         // Add implementations to contract storage
