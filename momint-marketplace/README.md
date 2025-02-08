@@ -238,5 +238,34 @@ The RWA Marketplace enables users to trade tokenized real-world assets seamlessl
 - **Listing Management**: Complete control over listing creation, cancellation, and updates.
 
 
+## **Listing Structure**
+Each listing in the marketplace is defined by the following structure to ensure proper listing managment:
+
+seller: The address of the token owner initiating the sale.
+tokenId: The unique identifier of the RWA token being listed.
+amount: The number of tokens available for sale.
+pricePerToken: The selling price for each token unit.
+paymentToken: The type of payment token accepted (e.g., USDT, LISK).
+active: Indicates whether the listing is currently active.
+
+## **Creating a Listing**
+To list RWA tokens for sale, the following function is utilized:
+
+```solidity
+function createListing(
+    uint256 tokenId,
+    uint256 amount,
+    uint256 pricePerToken,
+    address paymentToken
+) external;
+```
+Process:
+- Token Transfer: Transfers the specified amount of tokens from the seller to the marketplace's custody.
+- Listing Details: Sets all details needed for the listing structure.
+- Unique ID Generation: Generates a unique identifier for the new listing.
+- Active Listing: Listing becomes active and will be ready for purchases. 
+
+
+
 ## **Marketplace Controller Contract**
 ## Momint Vault Documentation
