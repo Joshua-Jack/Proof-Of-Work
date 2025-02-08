@@ -69,9 +69,7 @@ $ cast --help
 ### Overview
 The Momint Marketplace System is a solution for trading Real World Assets (RWA) tokens. It consists of the following three main components:
 
-1. ERC1155 RWA Token Contract
-
-## **Overview**
+## **ERC1155 RWA Token Contract**
 The ERC1155RWA contract is desinged for tokenizing real-world assets (RWAs) with built-in royalty support. This contract enables efficient multi-asset management while ensuring royalty distribution.
 
 ## **Key Features**
