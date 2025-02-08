@@ -226,5 +226,17 @@ function getRoyaltyDetails(
 - Helps marketplaces ensure proper royalty distribution.
 
 ## **Marketplace Contract**
+Overview
+The RWA Marketplace enables users to trade tokenized real-world assets seamlessly. It integrates directly with the ERC1155RWA token contract to ensure automated royalty distributions and supports various payment tokens for transactions.
+
+## **Key Features**
+- **Multi-Payment Support**: Accepts multiple ERC20 tokens for purchases (LISK, USDT, etc.).
+- **Secure Escrow System**: Holds tokens in custody during active listings with automated return mechanisms.
+- **Automated Fee Distribution**: Handles protocol fees and royalty payments with configurable fee structures.
+- **Batch Operations**: Supports purchasing from multiple listings in one transaction for gas efficiency.
+- **Emergency Controls**: Includes pause and emergency withdrawal functionality for risk management.
+- **Listing Management**: Complete control over listing creation, cancellation, and updates.
+
+
 ## **Marketplace Controller Contract**
 ## Momint Vault Documentation
