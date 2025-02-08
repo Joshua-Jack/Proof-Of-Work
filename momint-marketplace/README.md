@@ -225,5 +225,6 @@ function getRoyaltyDetails(
 - Returns the recipients and their respective payout amounts.
 - Helps marketplaces ensure proper royalty distribution.
 
-
+## **Marketplace Contract**
+## **Marketplace Controller Contract**
 ## Momint Vault Documentation
