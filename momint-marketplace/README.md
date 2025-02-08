@@ -249,7 +249,7 @@ paymentToken: The type of payment token accepted (e.g., USDT, LISK).
 active: Indicates whether the listing is currently active.
 
 ## **Creating a Listing**
-To list RWA tokens for sale, the following function is utilized:
+To list RWA tokens for sale, the following function is used:
 
 ```solidity
 function createListing(
@@ -265,7 +265,52 @@ Process:
 - Unique ID Generation: Generates a unique identifier for the new listing.
 - Active Listing: Listing becomes active and will be ready for purchases. 
 
+## **Purchasing an RWA Share**
+To purchase RWA tokens for sale, the following function is used:
 
+```solidity 
+ function buyTokens(
+        uint256 listingId,
+        uint256 amount
+    ) external;
+```
+Process:
+1. Validation:
+- Confirms the listing is active.
+- Verifies the amount of shares is available.
+2. Payment Processing
+  - Calculates and deducts protocol fees.
+  - Distributes royalties to entitled recipients.
+  - Transfers the remaining payment to the seller.
+3. Token Transfer and Listing Updates
+  - Transfers the purchased shares from the marketplace's custody to the buyer.
+  - Adjusts the balance of shares for the RWA if applicable the listing will be set to deactive.
+ 
+## **Canceling a Listing**
+To cancel the listing of an RWA that is currently listed, the following function is used:
+
+```solidity 
+ function cancelListing(
+        uint256 listingId
+    ) external;
+```
+1. Validation:
+ - Listing exists and is active
+ - Caller is the original seller
+2. State Updates
+ - Marks listing as inactive
+3. Token Transfer
+  - Transfer tokens back to seller
+
+ ## **Buy Multiple RWA'S from multiple listings**  
+ To purchase multiple RWA's for sale, the following function is used:
+```solidity 
+ function batchBuyTokens(
+        uint256[] calldata listingIds,
+        uint256[] calldata amounts
+    ) external;
+```
+The batch minting process mirrors the same process of purchasing from a single listing, with the main difference being that the system will handle multiple real-world assets (RWAs) the user intends to buy. All associated fees and royalties will be distributed as intended.
 
 ## **Marketplace Controller Contract**
 ## Momint Vault Documentation
