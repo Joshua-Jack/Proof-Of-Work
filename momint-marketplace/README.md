@@ -66,6 +66,11 @@ $ cast --help
 ```
 ## RWA Marketplace Documentation
 
+## Contract Addresses 
+  ERC1155RWA Implementation: 0x9bd61Df3B2bCa7f403F0eA59c86c8E6b032fbAf9
+  Proxy Admin: 0x378c2DD48f2c8EC91734c036a6227aAdD0016f58
+  ERC1155RWA Proxy: 0x592b312ef9fE0602463588117E3039a3907118C3
+
 ### Overview
 The Momint Marketplace System is a solution for trading Real World Assets (RWA) tokens. It consists of the following three main components:
 
