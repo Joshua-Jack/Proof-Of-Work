@@ -322,3 +322,173 @@ The batch minting process mirrors the same process of purchasing from a single l
 
 ## **Marketplace Controller Contract**
 ## Momint Vault Documentation
+
+The Momint Vault System is designed to manage real-world asset investments through a modular architecture. The system consists of several key components:
+
+1. Core Vault Contract
+2. Module System
+3. Controller Framework
+4. Storage Architecture
+
+### Key Features
+- Modular investment modules
+- Multi-token support
+- Automated returns distribution
+- Liquidity management
+
+## System Architecture
+
+### 1. Core Vault (MomintVault)
+
+The vault serves as the primary entry point for user interactions and liqudity management.
+
+#### Key Components:
+
+**Asset Management**
+Assets inside the 
+```solidity
+function deposit(uint256 assets, address receiver, uint256 moduleIndex)
+external
+returns (uint256 shares)
+```
+```solidity 
+function withdraw(uint256 shares, address receiver)
+external
+returns (uint256 assets)
+```
+
+**Returns Distribution**
+
+### Overview
+The returns distribution system manages how investment returns are distributed to projects through a structured epoch-based mechanism.
+
+#### Epoch Creation
+1. When returns are received from investments the admins will have the ability to call the following function for share holders to claim :
+   - A new epoch is created with a unique ID
+   - The total return amount is recorded
+   - The system calculates per-share distribution
+
+2. **Claim Process**
+   - Users claim their portion based on share ownership of a project 
+   - System verifies:
+     - User's share ownership at epoch time
+     - No previous claims for this epoch
+     - Valid epoch ID
+
+**Liquidity Control System**
+
+### Overview
+The liquidity control system ensures the vault maintains sufficient liquidity for withdrawals while maximizing efficiency.
+
+#### Liquidity Ratios
+- **Minimum Liquidity Hold (minLiquidityHoldBP)**
+  - Percentage of deposits kept as liquid reserves
+  - Default: 30% (3000 basis points)
+  - Adjustable by governance 
+
+- **Maximum Owner Share (maxOwnerShareBP)**
+  - Maximum allocation to project owners
+  - Default: 70% (7000 basis points)
+  - Adjustable by governance
+
+**Fee Management System**
+
+### Overview
+Multi Fee structure managing various operational aspects.
+
+### Fee Types
+
+1. **Deposit Fee**
+   - Charged on deposit
+   - Default: 5% (500 basis points)
+   - Calculation: `depositAmount * (depositFee / 10000)`
+   - - Adjustable by governance
+
+2. **Withdrawal Fee**
+   - Charged on withdrawal
+   - Default: 1% (100 basis points)
+   - Calculation: `withdrawAmount * (withdrawalFee / 10000)`
+   - - Adjustable by governance
+
+3. **Protocol Fee**
+   - Platform operation fee
+   - Default: 3% (300 basis points)
+   - Applied to returns
+   - - Adjustable by governance
+
+
+### 2. Module System
+
+Modules are pluggable components that implement specific recipes.
+
+## **Core Relationship**
+
+The Vault and Module system operates on a "Parent-Child" architecture where:
+
+### **Vault (Parent)**
+
+- Acts as the primary entry point for all user interactions
+- Holds and manages all actual assets (e.g., USDT)
+- Controls access to funds
+- Maintains the source of truth for total shares and assets
+- Coordinates all module activities
+
+### **Modules (Child)**
+
+- Handle investment state tracking
+- Calculate share allocations
+- Track user positions
+- Never directly handle assets
+- Operate as "bookkeepers" for specific recipes(Projects)
+
+## **Key Interaction Flows**
+
+### **1. Investment Process**
+- **User Entry**
+- User interacts only with the vault
+- Sends assets to vault
+- Specifies which module (Project) to use
+
+- **Vault Processing**
+- Receives and holds assets
+- Calculates and deducts fees
+- Requests share calculation from module
+
+- **Module Role**
+- Calculates appropriate share allocation
+- Updates internal state to track investment
+- Returns share calculation to vault
+  
+- **Completion**
+- Vault mints shares to user
+- Assets remain in vault
+- Module maintains record of position
+
+ ### **Returns Distribution**
+
+- **Initial Return Receipt**
+- Returns are sent to vault
+- Vault creates new distribution epoch for module(Project)
+  
+- **Claim Process**
+- Users request claims through vault
+- Vault checks with module for share verification
+- Module confirms user's position
+- Vault handles actual distribution of returns
+
+### **Withdrawal Process**
+
+- **User Request**
+- User requests withdrawal from vault
+- Specifies share amount to withdraw
+  
+- **Validation**
+- Vault checks with module for position verification
+- Module confirms user's share ownership
+- Vault verifies sufficient liquidity
+  
+- **Execution**
+- Module updates state to reflect withdrawal
+- Vault burns shares
+- Vault transfers assets to user
+
