@@ -73,6 +73,8 @@ $ cast --help
   - Marketplace Implementation: 0x0e7471096704c969dB48e747a8f265194A0054AA
   - Proxy Admin: 0xc2Ff2e91A4A80e8b88C2eFf08f2B76790FFDa85C
   - Marketplace Proxy: 0xFb70098882BEf5198fE3294fBd3D026741E1B59F
+  - MarketplaceController deployed at: 0x239dF500874530EF5C8EBc795b188472dFbe8E7d
+  - Admin address: 0x5C614f5e552295365D0Df72091b727301e5f231D
 
 ### Overview
 The Momint Marketplace System is a solution for trading Real World Assets (RWA) tokens. It consists of the following three main components:
