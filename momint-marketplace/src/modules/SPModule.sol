@@ -25,13 +25,13 @@ contract SPModule is
     IModule
 {
     using ModuleMath for uint256;
-    uint8 public constant decimalOffset = 9;
 
+    // State variables
     mapping(address => UserInvestment) private _userInvestments;
     mapping(address => uint256) private _userRewardDebt;
     ProjectRewards private _projectRewards;
     ProjectInfo private _project;
-    uint256 private immutable _projectId;
+    uint256 private _projectId;
     bool private _initialized;
     address public vaults;
 
@@ -51,11 +51,13 @@ contract SPModule is
     error InvalidOwner();
     error InvalidName();
     error NotVault();
+
     event ModuleInitialized(
         uint256 indexed projectId,
         address admin,
         address vault
     );
+
     event SharesMinted(
         address indexed to,
         uint256 indexed projectId,
@@ -67,8 +69,16 @@ contract SPModule is
         _;
     }
 
-    constructor(
-        uint256 projectId_,
+    /// @notice The constructor is kept minimal for the implementation.
+    constructor() ERC1155("") {
+        // No initialization logic here – clones will call initialize()
+    }
+
+    /**
+     * @notice Initializes a clone with the desired parameters.
+     * Can only be called once.
+     */
+    function initialize(
         address admin,
         address vault_,
         string memory name,
@@ -76,8 +86,8 @@ contract SPModule is
         uint256 totalShares,
         string memory uri_,
         address owner
-    ) ERC1155(uri_) {
-        if (projectId_ == 0) revert InvalidProjectId();
+    ) external {
+        if (_initialized) revert ProjectAlreadyInitialized();
         if (totalShares == 0) revert InvalidTotalShares();
         if (pricePerShare == 0) revert InvalidPricePerShare();
         if (bytes(uri_).length == 0) revert InvalidURI();
@@ -86,7 +96,7 @@ contract SPModule is
         if (owner == address(0)) revert InvalidOwner();
         if (bytes(name).length == 0) revert InvalidName();
 
-        _projectId = projectId_;
+        _projectId = 1;
         _validateInitialization(
             admin,
             vault_,
@@ -96,6 +106,11 @@ contract SPModule is
         );
         vaults = vault_;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
+
+        //  manually set the URI.
+        _setURI(uri_);
+
+        // Mint the total shares to this contract
         _mint(address(this), _projectId, totalShares, "");
 
         _project = ProjectInfo({
@@ -110,12 +125,13 @@ contract SPModule is
             owner: owner
         });
 
+        _initialized = true;
         emit ModuleInitialized(_projectId, admin, vault_);
         emit ProjectAdded(_projectId, name, pricePerShare, totalShares, uri_);
     }
 
-    /// Public functions
-    // slither-disable-next-line divide-before-multiply
+    // === Public functions ===
+
     function invest(
         uint256 amount,
         address user
@@ -123,20 +139,15 @@ contract SPModule is
         if (!_project.active) revert InvalidProjectId();
         if (amount == 0) revert InvalidAmount();
 
+        // Calculate shares based on the provided amount.
         shares = amount / _project.pricePerShare;
-
-        // Calculate actual cost
         uint256 cost = shares * _project.pricePerShare;
-
-        // Calculate refund
         refund = amount - cost;
-        // Validate shares
+
         if (shares == 0) revert InvalidAmount();
         if (shares > _project.availableShares) revert InsufficientShares();
 
-        // Update state with normalized values
         _updateInvestmentState(user, shares, cost);
-
         emit SharesAllocated(user, _projectId, shares, cost, refund);
         return (shares, refund);
     }
@@ -145,29 +156,16 @@ contract SPModule is
         uint256 shares,
         address user
     ) external nonReentrant returns (uint256 amount) {
-        // Only vault can call this function
         if (msg.sender != vaults) revert NotVault();
         if (!_project.active) revert ProjectInactive();
 
-        // Validate divestment
         _validateDivestment(user, shares);
-
-        // Calculate amount to return based on share price
         amount = shares * _project.pricePerShare;
         emit SharesDivested(user, _projectId, shares, amount);
 
-        // Update user's investment state
         _updateDivestmentState(user, shares, amount);
-
-        // Update reward debt
         _updateRewardDebt(user);
-
         return amount;
-    }
-
-    function mintShares(uint256 amount) external onlyVault nonReentrant {
-        _mint(address(this), _projectId, amount, "");
-        emit SharesMinted(address(this), _projectId, amount);
     }
 
     function distributeRevenue(uint256 projectId, uint256 amount) external {
@@ -179,23 +177,18 @@ contract SPModule is
             amount,
             _project.allocatedShares
         );
-
         _updateRevenueState(amount, newRevenuePerShare);
         emit RevenueDistributed(projectId, amount, newRevenuePerShare);
     }
 
-    /// View functions
+    // === View functions ===
+
     function isSingleProject() external pure returns (bool) {
         return true;
     }
 
-    function getActiveProjectId()
-        external
-        pure
-        override
-        returns (uint256 projectId)
-    {
-        return projectId;
+    function getActiveProjectId() external view override returns (uint256) {
+        return _projectId;
     }
 
     function nftContract() external view override returns (IERC1155) {
@@ -245,7 +238,8 @@ contract SPModule is
         return _userInvestments[user].projectShares[_projectId];
     }
 
-    /// Internal Helper functions
+    // === Internal Helper functions ===
+
     function _setupInitialState(
         address admin,
         address vault_,
@@ -337,7 +331,8 @@ contract SPModule is
         if (pricePerShare == 0) revert InvalidPricePerShare();
     }
 
-    // Required overrides
+    // === Overrides ===
+
     function _update(
         address from,
         address to,

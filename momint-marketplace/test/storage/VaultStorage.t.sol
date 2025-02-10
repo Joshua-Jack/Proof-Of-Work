@@ -10,32 +10,26 @@ contract VaultStorageTest is Test {
     address public admin = address(0x1);
     address public user = address(0x2);
     address public vault = address(0x3);
-    address public asset;
+    bytes32 public vaultId = keccak256("TEST_VAULT");
 
-    event VaultStored(address indexed vault, string name, address asset);
+    event VaultStored(address indexed vault, bytes32 vaultId);
     event VaultRemoved(address indexed vault);
 
     function setUp() public {
         vaultStorage = new VaultStorage(admin);
-        asset = address(new MockERC20("Test Token", "TEST", 18));
     }
 
     function test_StoreVault() public {
         vm.startPrank(admin);
 
-        string memory name = "Test Vault";
+        vm.expectEmit(true, true, true, true);
+        emit VaultStored(vault, vaultId);
 
-        vm.expectEmit(true, false, false, true);
-        emit VaultStored(vault, name, asset);
+        vaultStorage.storeVault(vault, vaultId);
 
-        vaultStorage.storeVault(vault, name, asset);
-
-        VaultStorage.VaultInfo memory info = vaultStorage.getVault(vault);
-        assertEq(info.vaultAddress, vault);
-        assertEq(info.name, name);
-        assertEq(info.asset, asset);
-        assertTrue(info.active);
-        assertTrue(info.deployedAt > 0);
+        assertTrue(vaultStorage.vaultExists(vault));
+        assertEq(vaultStorage.vault(vaultId), vault);
+        assertEq(vaultStorage.getAllVaults()[0], vault);
 
         vm.stopPrank();
     }
@@ -43,17 +37,15 @@ contract VaultStorageTest is Test {
     function test_RemoveVault() public {
         vm.startPrank(admin);
 
-        vaultStorage.storeVault(vault, "Test Vault", asset);
+        vaultStorage.storeVault(vault, vaultId);
 
-        vm.expectEmit(true, false, false, true);
+        vm.expectEmit(true, false, false, false);
         emit VaultRemoved(vault);
 
-        vaultStorage.removeVault(vault);
+        vaultStorage.removeVault(vault, vaultId);
 
-        VaultStorage.VaultInfo memory info = vaultStorage.getVault(vault);
-        assertFalse(info.active);
-        assertEq(info.vaultAddress, vault); // Address should remain
-        assertEq(info.asset, asset); // Asset should remain
+        assertFalse(vaultStorage.vaultExists(vault));
+        assertEq(vaultStorage.vault(vaultId), address(0));
 
         vm.stopPrank();
     }
@@ -62,51 +54,50 @@ contract VaultStorageTest is Test {
         vm.startPrank(admin);
 
         // Test empty list first
-        VaultStorage.VaultInfo[] memory emptyVaults = vaultStorage
-            .getAllVaults();
+        address[] memory emptyVaults = vaultStorage.getAllVaults();
         assertEq(emptyVaults.length, 0);
 
         // Store multiple vaults
         address vault2 = address(0x4);
-        vaultStorage.storeVault(vault, "Test Vault 1", asset);
-        vaultStorage.storeVault(vault2, "Test Vault 2", asset);
+        bytes32 vaultId2 = keccak256("TEST_VAULT_2");
+        vaultStorage.storeVault(vault, vaultId);
+        vaultStorage.storeVault(vault2, vaultId2);
 
-        // Test active vaults
-        VaultStorage.VaultInfo[] memory activeVaults = vaultStorage
-            .getAllVaults();
-        assertEq(activeVaults.length, 2);
-        assertEq(activeVaults[0].vaultAddress, vault);
-        assertEq(activeVaults[1].vaultAddress, vault2);
-        assertTrue(activeVaults[0].active);
-        assertTrue(activeVaults[1].active);
-
-        // Remove one vault and verify list still contains both but one is inactive
-        vaultStorage.removeVault(vault);
-        VaultStorage.VaultInfo[] memory mixedVaults = vaultStorage
-            .getAllVaults();
-        assertEq(mixedVaults.length, 2);
-        assertFalse(mixedVaults[0].active);
-        assertTrue(mixedVaults[1].active);
+        // Test stored vaults
+        address[] memory vaults = vaultStorage.getAllVaults();
+        assertEq(vaults.length, 2);
+        assertEq(vaults[0], vault);
+        assertEq(vaults[1], vault2);
 
         vm.stopPrank();
     }
 
-    function test_VaultExists() public {
+    function test_GetVault() public {
         vm.startPrank(admin);
 
-        // Test zero address
-        assertFalse(vaultStorage.vaultExists(address(0)));
+        vaultStorage.storeVault(vault, vaultId);
 
-        // Test non-existent vault
-        assertFalse(vaultStorage.vaultExists(vault));
+        address retrievedVault = vaultStorage.getVault(vaultId);
+        assertEq(retrievedVault, vault);
 
-        // Store and test active vault
-        vaultStorage.storeVault(vault, "Test Vault", asset);
-        assertTrue(vaultStorage.vaultExists(vault));
+        vm.stopPrank();
+    }
 
-        // Remove and test inactive vault
-        vaultStorage.removeVault(vault);
-        assertFalse(vaultStorage.vaultExists(vault));
+    function test_MaxVaults() public {
+        vm.startPrank(admin);
+
+        // Store up to max vaults
+        for (uint256 i = 0; i < vaultStorage.maxVaults(); i++) {
+            address newVault = address(uint160(i + 1));
+            bytes32 newVaultId = keccak256(abi.encodePacked(i));
+            vaultStorage.storeVault(newVault, newVaultId);
+        }
+
+        // Try to store one more
+        vm.expectRevert(
+            abi.encodeWithSelector(VaultStorage.MaxVaultsReached.selector, 1001)
+        );
+        vaultStorage.storeVault(address(0x999), keccak256("OVERFLOW"));
 
         vm.stopPrank();
     }
@@ -117,31 +108,31 @@ contract VaultStorageTest is Test {
         vm.expectRevert(
             abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
         );
-        vaultStorage.storeVault(vault, "Test Vault", asset);
+        vaultStorage.storeVault(vault, vaultId);
 
         vm.stopPrank();
     }
 
     function test_RevertUnauthorizedRemove() public {
         vm.startPrank(admin);
-        vaultStorage.storeVault(vault, "Test Vault", asset);
+        vaultStorage.storeVault(vault, vaultId);
         vm.stopPrank();
 
         vm.startPrank(user);
         vm.expectRevert(
             abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
         );
-        vaultStorage.removeVault(vault);
+        vaultStorage.removeVault(vault, vaultId);
         vm.stopPrank();
     }
 
     function test_RevertDuplicateVault() public {
         vm.startPrank(admin);
 
-        vaultStorage.storeVault(vault, "Test Vault", asset);
+        vaultStorage.storeVault(vault, vaultId);
 
         vm.expectRevert(VaultStorage.VaultAlreadyStored.selector);
-        vaultStorage.storeVault(vault, "Duplicate Vault", asset);
+        vaultStorage.storeVault(vault, vaultId);
 
         vm.stopPrank();
     }
@@ -150,30 +141,32 @@ contract VaultStorageTest is Test {
         vm.startPrank(admin);
 
         vm.expectRevert(VaultStorage.VaultNotStored.selector);
-        vaultStorage.removeVault(address(0x123));
+        vaultStorage.removeVault(address(0x123), vaultId);
 
         vm.stopPrank();
     }
 
-    function test_GetNonExistentVault() public {
-        // Test zero address
-        VaultStorage.VaultInfo memory zeroInfo = vaultStorage.getVault(
-            address(0)
-        );
-        assertEq(zeroInfo.vaultAddress, address(0));
-        assertFalse(zeroInfo.active);
-        assertEq(zeroInfo.name, "");
-        assertEq(zeroInfo.asset, address(0));
-        assertEq(zeroInfo.deployedAt, 0);
+    function test_RevertInvalidAddress() public {
+        vm.startPrank(admin);
 
-        // Test random address
-        VaultStorage.VaultInfo memory randomInfo = vaultStorage.getVault(
-            address(0x123)
+        vm.expectRevert(VaultStorage.InvalidAddress.selector);
+        vaultStorage.storeVault(address(0), vaultId);
+
+        vm.stopPrank();
+    }
+
+    function test_RevertVaultDoesNotExist() public {
+        vm.startPrank(admin);
+
+        bytes32 nonExistentId = keccak256("NON_EXISTENT");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                VaultStorage.VaultDoesNotExist.selector,
+                nonExistentId
+            )
         );
-        assertEq(randomInfo.vaultAddress, address(0));
-        assertFalse(randomInfo.active);
-        assertEq(randomInfo.name, "");
-        assertEq(randomInfo.asset, address(0));
-        assertEq(randomInfo.deployedAt, 0);
+        vaultStorage.getVault(nonExistentId);
+
+        vm.stopPrank();
     }
 }

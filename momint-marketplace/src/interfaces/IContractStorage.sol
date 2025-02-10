@@ -28,4 +28,6 @@ interface IContractStorage {
     function getContract(
         bytes32 id_
     ) external view returns (ContractData memory);
+
+    function getAllContracts() external view returns (address[] memory);
 }

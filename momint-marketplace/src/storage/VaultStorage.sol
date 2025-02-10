@@ -1,97 +1,54 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IVaultStorage} from "../interfaces/IVaultStorage.sol";
 
-contract VaultStorage is Ownable {
-    struct VaultInfo {
-        address vaultAddress;
-        string name;
-        address asset;
-        bool active;
-        uint256 deployedAt;
-    }
+contract VaultStorage is Ownable, IVaultStorage {
+    uint256 public maxVaults = 1000;
 
-    mapping(address => VaultInfo) public vaults;
+    mapping(address => bool) public vaultExists;
+    mapping(bytes32 => address) public vault;
     address[] public vaultList;
 
-    event VaultStored(address indexed vault, string name, address asset);
+    event VaultStored(address indexed vault, bytes32 vaultId);
     event VaultRemoved(address indexed vault);
 
     error VaultAlreadyStored();
     error VaultNotStored();
+    error InvalidAddress();
+    error MaxVaultsReached(uint256 maxVaults);
+    error VaultDoesNotExist(bytes32 vaultId);
 
     constructor(address owner_) Ownable(owner_) {}
 
     // slither-disable-next-line timestamp
-    function storeVault(
-        address vault,
-        string memory name,
-        address asset
-    ) external onlyOwner {
-        if (vaults[vault].vaultAddress != address(0))
-            revert VaultAlreadyStored();
+    function storeVault(address vault_, bytes32 vaultId_) external onlyOwner {
+        if (vault_ == address(0)) revert InvalidAddress();
+        if (vaultExists[vault_]) revert VaultAlreadyStored();
+        emit VaultStored(vault_, vaultId_);
 
-        if (vaults[vault].active) revert VaultAlreadyStored();
-
-        vaults[vault] = VaultInfo({
-            vaultAddress: vault,
-            name: name,
-            asset: asset,
-            active: true,
-            deployedAt: block.timestamp
-        });
-        vaultList.push(vault);
-
-        emit VaultStored(vault, name, asset);
+        vaultExists[vault_] = true;
+        vault[vaultId_] = vault_;
+        vaultList.push(vault_);
+        if (vaultList.length > maxVaults)
+            revert MaxVaultsReached(vaultList.length);
     }
 
     // slither-disable-next-line timestamp
-    function removeVault(address vault) external onlyOwner {
-        if (vaults[vault].vaultAddress == address(0)) revert VaultNotStored();
-        vaults[vault].active = false;
-        emit VaultRemoved(vault);
+    function removeVault(address vault_, bytes32 vaultId_) external onlyOwner {
+        if (vaultExists[vault_] == false) revert VaultNotStored();
+        if (vault[vaultId_] == address(0)) revert InvalidAddress();
+        delete vaultExists[vault_];
+        delete vault[vaultId_];
+        emit VaultRemoved(vault_);
     }
 
-    function getAllVaults() external view returns (VaultInfo[] memory) {
-        uint256 totalLength = vaultList.length;
-        VaultInfo[] memory allVaults = new VaultInfo[](totalLength);
-        for (uint i = 0; i < totalLength; i++) {
-            allVaults[i] = vaults[vaultList[i]];
-        }
-        return allVaults;
+    function getAllVaults() external view returns (address[] memory) {
+        return vaultList;
     }
 
-    function getActiveVaults() external view returns (address[] memory) {
-        uint256 activeCount = 0;
-        uint256 totalLength = vaultList.length;
-
-        // First pass: count active vaults
-        for (uint256 i = 0; i < totalLength; i++) {
-            if (vaults[vaultList[i]].active) {
-                activeCount++;
-            }
-        }
-
-        // Create array with exact size needed
-        address[] memory activeVaults = new address[](activeCount);
-        uint256 currentIndex = 0;
-
-        // Second pass: populate array
-        for (uint256 i = 0; i < totalLength; i++) {
-            if (vaults[vaultList[i]].active) {
-                activeVaults[currentIndex] = vaultList[i];
-                currentIndex++;
-            }
-        }
-
-        return activeVaults;
-    }
-
-    function getVault(address vault) external view returns (VaultInfo memory) {
-        return vaults[vault];
-    }
-
-    function vaultExists(address vault) external view returns (bool) {
-        return vaults[vault].active;
+    function getVault(bytes32 vaultId_) external view returns (address) {
+        if (vault[vaultId_] == address(0)) revert VaultDoesNotExist(vaultId_);
+        return vault[vaultId_];
     }
 }

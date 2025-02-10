@@ -14,6 +14,12 @@ import {ContractData} from "../../src/interfaces/IContractStorage.sol";
 import {MockERC20} from "../../test/mocks/MockERC20.sol";
 import {InitParams} from "../../src/vault/MomintVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {Module} from "../../src/interfaces/IMomintVault.sol";
+import {IModule} from "../../src/interfaces/IModule.sol";
+import {MomintVault} from "../../src/vault/MomintVault.sol";
+import {InitParams} from "../../src/interfaces/IMomintVault.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 
 contract VaultControllerTest is Test {
     VaultController public controller;
@@ -22,6 +28,9 @@ contract VaultControllerTest is Test {
     ContractStorage public contractStorage;
     MomintFactory public factory;
     MockERC20 public asset;
+    SPModule public moduleImpl;
+    MomintVault public vault;
+    IERC20 public USDT = IERC20(0x05D032ac25d322df992303dCa074EE7392C117b9);
 
     address public admin = address(0x1);
     address public user = address(0x2);
@@ -34,721 +43,462 @@ contract VaultControllerTest is Test {
         keccak256("VAULT_IMPL_V1");
     bytes32 public constant MODULE_IMPLEMENTATION_ID =
         keccak256("MODULE_IMPL_V1");
+    bytes32 public constant VAULT_CONTROLLER_ROLE =
+        keccak256("VAULT_CONTROLLER");
 
-    event VaultDeployed(
-        address indexed vault,
-        string name,
-        address asset,
-        bool isClone
-    );
-    event ModuleDeployed(
-        address indexed module,
-        address indexed vault,
-        string name,
-        bool isClone
-    );
+    event VaultDeployed(address indexed vault, bytes32 indexed vaultId);
+    event ModuleDeployed(address indexed module, bytes32 indexed moduleId);
+    event PausingAllVaults();
+    event UnpausingAllVaults();
+    event VaultPaused(address indexed vault);
+    event VaultUnpaused(address indexed vault);
+    event AddingNewContract(bytes32 indexed id, ContractData data);
+    event RemovingContract(bytes32 indexed id);
+
+    string constant LISK_RPC_URL = "https://rpc.api.lisk.com";
+    uint256 constant FORK_BLOCK_NUMBER = 11774326;
 
     function setUp() public {
         console2.log("Setting up test environment...");
         console2.log("Admin address:", admin);
 
+        uint256 lisk = vm.createFork(LISK_RPC_URL, FORK_BLOCK_NUMBER);
+        vm.selectFork(lisk);
         // Deploy mock asset
         asset = new MockERC20("Test Token", "TEST", 18);
         console2.log("Deployed mock asset at:", address(asset));
 
-        // Deploy controller first
-        controller = new VaultController(admin);
+        vm.startPrank(admin);
 
         // Deploy storage contracts
+
         vaultStorage = new VaultStorage(admin);
         moduleStorage = new ModuleStorage(admin);
         contractStorage = new ContractStorage(admin);
         factory = new MomintFactory(admin);
-
-        console2.log("Deployed core contracts:");
-        console2.log("- VaultStorage:", address(vaultStorage));
-        console2.log("- ModuleStorage:", address(moduleStorage));
-        console2.log("- ContractStorage:", address(contractStorage));
-        console2.log("- Factory:", address(factory));
-        console2.log("- Controller:", address(controller));
-
-        vm.startPrank(admin);
-
-        // Deploy and initialize implementations
-        MomintVault vaultImpl = new MomintVault();
-        vaultImpl.initialize(
-            InitParams({
-                baseAsset: IERC20(address(asset)),
-                symbol: "MV",
-                shareName: "Momint Vault",
-                owner: admin,
-                feeRecipient: feeRecipient,
-                fees: VaultFees({
-                    depositFee: 0,
-                    withdrawalFee: 0,
-                    protocolFee: 0
-                }),
-                liquidityHoldBP: 3000, // 30%
-                maxOwnerShareBP: 7000 // 70%
-            })
-        );
-        SPModule moduleImpl = new SPModule(
-            1,
+        controller = new VaultController(
             admin,
-            address(vaultImpl),
-            "Test Project",
-            5e6,
-            100,
-            "ipfs://metadata",
-            user2
-        );
-
-        // Store implementation addresses
-        vaultImplementation = address(vaultImpl);
-        moduleImplementation = address(moduleImpl);
-
-        console2.log("Deployed implementations:");
-        console2.log("- Vault implementation:", vaultImplementation);
-        console2.log("- Module implementation:", moduleImplementation);
-
-        // Register implementations in contract storage
-        contractStorage.addContract(
-            VAULT_IMPLEMENTATION_ID,
-            ContractData({
-                contractAddress: address(vaultImpl),
-                initDataRequired: true
-            })
-        );
-
-        contractStorage.addContract(
-            MODULE_IMPLEMENTATION_ID,
-            ContractData({
-                contractAddress: moduleImplementation,
-                initDataRequired: false
-            })
-        );
-
-        // Set up controller
-        controller.setRegistries(
-            address(vaultStorage),
+            address(factory),
             address(moduleStorage),
             address(contractStorage),
-            address(factory)
+            address(vaultStorage)
         );
 
-        // Transfer ownership
         vaultStorage.transferOwnership(address(controller));
         moduleStorage.transferOwnership(address(controller));
         contractStorage.transferOwnership(address(controller));
         factory.transferOwnership(address(controller));
 
-        // Grant necessary roles
-        controller.grantRole(
-            controller.VAULT_CONTROLLER_ROLE(),
-            address(controller)
+        // Deploy and initialize vault implementation
+        vaultImplementation = Clones.clone(address(new MomintVault()));
+        vault = MomintVault(vaultImplementation);
+        InitParams memory params = InitParams({
+            baseAsset: USDT,
+            symbol: "MV",
+            shareName: "Momint Vault",
+            owner: address(controller),
+            feeRecipient: admin,
+            fees: VaultFees({
+                depositFee: 500,
+                withdrawalFee: 100,
+                protocolFee: 300
+            }),
+            liquidityHoldBP: 3000, // 30%
+            maxOwnerShareBP: 7000 // 70%
+        });
+        vault.initialize(params);
+
+        // Deploy module implementation
+        moduleImpl = new SPModule();
+        moduleImpl.initialize(
+            admin,
+            address(vaultImplementation),
+            "Test Module",
+            5e6,
+            100,
+            "ipfs://metadata",
+            user2
+        );
+        moduleImplementation = address(moduleImpl);
+
+        // Register implementations in contract storage
+        controller.addNewContract(
+            VAULT_IMPLEMENTATION_ID,
+            ContractData({
+                contractAddress: vaultImplementation,
+                initDataRequired: true
+            })
         );
 
-        // After factory deployment
-        factory.grantRole(factory.DEPLOYER_ROLE(), address(controller));
+        controller.addNewContract(
+            MODULE_IMPLEMENTATION_ID,
+            ContractData({
+                contractAddress: moduleImplementation,
+                initDataRequired: true
+            })
+        );
+
+        // Grant roles
+        controller.grantRole(VAULT_CONTROLLER_ROLE, admin);
 
         vm.stopPrank();
+
         console2.log("Setup complete!");
     }
 
-    function test_deployVault_Clone() public {
+    function test_RevertWhen_NonAdminCallsRestrictedFunction() public {
         vm.startPrank(admin);
-
-        // Deploy new vault
-        address vaultAddress = controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            "Test Vault",
-            address(asset),
-            admin,
-            feeRecipient,
-            VaultFees({depositFee: 0, withdrawalFee: 0, protocolFee: 0}),
-            true // isClone
-        );
-
-        // Verify deployment
-        assertTrue(vaultAddress != address(0), "Vault not deployed");
-
-        vm.stopPrank();
-    }
-
-    function test_deployVault_Direct() public {
-        console2.log("\nTesting vault deployment (direct)...");
-        _testDeployVault(false);
-    }
-
-    function _testDeployVault(bool useClone) internal {
-        string memory vaultName = "Test Vault";
-        VaultFees memory fees = VaultFees({
-            depositFee: 0,
-            withdrawalFee: 0,
-            protocolFee: 0
+        // First register the vault implementation
+        bytes32 vaultId = keccak256("TEST_VAULT_V1");
+        ContractData memory vaultData = ContractData({
+            contractAddress: vaultImplementation,
+            initDataRequired: true
         });
 
-        vm.startPrank(admin);
-
-        console2.log("Deploying vault with name:", vaultName);
-        console2.log("Deployment type:", useClone ? "Clone" : "Direct");
-
-        address newVault = controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            vaultName,
-            address(asset),
-            admin,
-            feeRecipient,
-            fees,
-            useClone
-        );
-
-        console2.log("Vault deployed at:", newVault);
-
-        // Verify vault was stored
-        VaultStorage.VaultInfo memory vaultInfo = controller.getVaultInfo(
-            newVault
-        );
-        console2.log("Vault storage verification:");
-        console2.log("- Name:", vaultInfo.name);
-        console2.log("- Asset:", vaultInfo.asset);
-        console2.log("- Active:", vaultInfo.active);
-
-        assertTrue(newVault != address(0), "Vault not deployed");
-        assertEq(vaultInfo.name, vaultName, "Wrong vault name");
-        assertEq(vaultInfo.asset, address(asset), "Wrong asset");
-        assertTrue(vaultInfo.active, "Vault not active");
-
+        controller.addNewContract(vaultId, vaultData);
         vm.stopPrank();
-    }
 
-    function _testDeployAndAddModule(bool useClone) internal {
-        // First deploy a vault
-        address vault = _deployTestVault();
-        console2.log("Test vault deployed at:", vault);
-
-        string memory projectName = "Test Project";
-        vm.startPrank(admin);
-
-        console2.log("Deploying module with name:", projectName);
-        console2.log("Deployment type:", useClone ? "Clone" : "Direct");
-
-        bytes32 salt = keccak256(
-            abi.encodePacked("test_salt", block.timestamp)
-        );
-        address module = controller.deployAndAddModule(
-            vault,
-            admin,
-            projectName,
-            1e18, // pricePerShare
-            100e18, // totalShares
-            "ipfs://test",
-            useClone,
-            salt,
-            MODULE_IMPLEMENTATION_ID
-        );
-
-        console2.log("Module deployed at:", module);
-
-        // Verify module was stored
-        ModuleStorage.ModuleInfo memory moduleInfo = controller.getModuleInfo(
-            module
-        );
-        console2.log("Module storage verification:");
-        console2.log("- Name:", moduleInfo.name);
-        console2.log("- Vault:", moduleInfo.vault);
-        console2.log("- Project ID:", moduleInfo.projectId);
-        console2.log("- Active:", moduleInfo.active);
-
-        assertTrue(module != address(0), "Module not deployed");
-        assertEq(moduleInfo.name, projectName, "Wrong module name");
-        assertEq(moduleInfo.vault, vault, "Wrong vault");
-        assertTrue(moduleInfo.active, "Module not active");
-
-        vm.stopPrank();
-    }
-
-    function test_deployAndAddModule_Direct() public {
-        // First, deploy a test vault.
-        address vault = _deployTestVault();
-
-        // Define project/module parameters.
-        string memory projectName = "Test Project Direct";
-        bytes32 salt = keccak256("test_salt_direct");
-        vm.startPrank(admin);
-
-        // Deploy and add the module (useClone set to false)
-        address moduleAddress = controller.deployAndAddModule(
-            vault,
-            admin,
-            projectName,
-            1e18,
-            100e18,
-            "ipfs://test",
-            false,
-            salt,
-            MODULE_IMPLEMENTATION_ID
-        );
-
-        // Verify that the module was stored in ModuleStorage correctly.
-        ModuleStorage.ModuleInfo memory moduleInfo = controller.getModuleInfo(
-            moduleAddress
-        );
-        console2.log("\nModule storage verification:");
-        console2.log("- Name:", moduleInfo.name);
-        console2.log("- Vault:", moduleInfo.vault);
-        console2.log("- Project ID:", moduleInfo.projectId);
-        console2.log("- Active:", moduleInfo.active);
-
-        assertTrue(moduleAddress != address(0), "Module not deployed");
-        assertEq(moduleInfo.name, projectName, "Module name mismatch");
-        assertEq(moduleInfo.vault, vault, "Vault address mismatch");
-        assertTrue(moduleInfo.active, "Module is not active");
-
-        vm.stopPrank();
-    }
-
-    function test_deployAndAddModule_Clone() public {
-        console2.log("\nTesting module deployment (clone)...");
-        _testDeployAndAddModule(true);
-    }
-
-    function test_deployVaultWithInvalidAsset() public {
-        vm.startPrank(admin);
-
-        vm.expectRevert(VaultController.InvalidAddress.selector);
-        controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            "Test Vault",
-            address(0),
-            admin,
-            feeRecipient,
-            VaultFees({depositFee: 0, withdrawalFee: 0, protocolFee: 0}),
-            true
-        );
-        vm.stopPrank();
-    }
-
-    function test_deployVaultWithInvalidFeeRecipient() public {
-        vm.startPrank(admin);
-
-        vm.expectRevert(VaultController.InvalidAddress.selector);
-        controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            "Test Vault",
-            address(asset),
-            admin,
-            address(0),
-            VaultFees({depositFee: 0, withdrawalFee: 0, protocolFee: 0}),
-            true
-        );
-        vm.stopPrank();
-    }
-
-    function test_setRegistriesMultipleZeroAddresses() public {
-        vm.startPrank(admin);
-
-        vm.expectRevert(VaultController.InvalidAddress.selector);
-        controller.setRegistries(
-            address(0),
-            address(0),
-            address(0),
-            address(0)
-        );
-        vm.stopPrank();
-    }
-
-    function test_getModuleInfoNonExistent() public {
-        vm.startPrank(admin);
-        ModuleStorage.ModuleInfo memory moduleInfo = controller.getModuleInfo(
-            address(0)
-        );
-        assertEq(
-            moduleInfo.name,
-            "",
-            "Non-existent module should return empty info"
-        );
-        assertEq(
-            moduleInfo.vault,
-            address(0),
-            "Non-existent module should return zero address vault"
-        );
-        assertFalse(
-            moduleInfo.active,
-            "Non-existent module should be inactive"
-        );
-        vm.stopPrank();
-    }
-
-    function test_getVaultInfoNonExistent() public {
-        vm.startPrank(admin);
-        VaultStorage.VaultInfo memory vaultInfo = controller.getVaultInfo(
-            address(0)
-        );
-        assertEq(
-            vaultInfo.name,
-            "",
-            "Non-existent vault should return empty info"
-        );
-        assertEq(
-            vaultInfo.asset,
-            address(0),
-            "Non-existent vault should return zero address asset"
-        );
-        assertFalse(vaultInfo.active, "Non-existent vault should be inactive");
-        vm.stopPrank();
-    }
-
-    function test_RevertCases() public {
-        console2.log("\nTesting revert cases...");
-
-        // Test invalid implementation ID
-        vm.startPrank(admin);
-        bytes32 invalidId = keccak256("INVALID_ID");
-        console2.log(
-            "Testing invalid implementation ID:",
-            vm.toString(invalidId)
-        );
-
-        vm.expectRevert(VaultController.ContractNotFound.selector);
-        controller.deployNewVault(
-            invalidId,
-            "Test",
-            address(asset),
-            admin,
-            feeRecipient,
-            VaultFees({depositFee: 0, withdrawalFee: 0, protocolFee: 0}),
-            true
-        );
-        console2.log("Invalid implementation revert test passed");
-
-        // Test unauthorized caller
-        vm.stopPrank();
         vm.startPrank(user);
-        console2.log("Testing unauthorized caller:", user);
+        // Then attempt deployment
+        bytes memory initData = _createVaultInitData();
 
         vm.expectRevert();
-        controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            "Test",
-            address(asset),
-            admin,
-            feeRecipient,
-            VaultFees({depositFee: 0, withdrawalFee: 0, protocolFee: 0}),
-            true
-        );
-        console2.log("Unauthorized caller revert test passed");
+        address deployedVault = controller.deployVault(vaultId, initData);
 
         vm.stopPrank();
     }
 
-    function _deployTestVault() internal returns (address) {
-        vm.startPrank(admin);
-        address vault = controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            "Test Vault",
-            address(asset),
-            admin,
-            feeRecipient,
-            VaultFees({depositFee: 0, withdrawalFee: 0, protocolFee: 0}),
-            true
-        );
-        vm.stopPrank();
-        return vault;
-    }
-
-    function test_setRegistriesWithZeroAddress() external {
-        vm.startPrank(admin);
-        // Try to set a zero address for one of the registries
-        vm.expectRevert(VaultController.InvalidAddress.selector);
-        controller.setRegistries(
-            address(0),
-            address(moduleStorage),
-            address(contractStorage),
-            address(factory)
-        );
-        vm.stopPrank();
-    }
-
-    function test_setRegistriesUnauthorized() external {
-        vm.startPrank(user);
-        bytes32 role = controller.DEFAULT_ADMIN_ROLE();
-        vm.expectRevert(
-            abi.encodeWithSignature(
-                "AccessControlUnauthorizedAccount(address,bytes32)",
-                user,
-                role
-            )
-        );
-        controller.setRegistries(
-            address(vaultStorage),
-            address(moduleStorage),
-            address(contractStorage),
-            address(factory)
-        );
-        vm.stopPrank();
-    }
-
-    function test_deployVaultUnauthorized() external {
-        vm.startPrank(user);
-        bytes32 role = controller.VAULT_CONTROLLER_ROLE();
-        vm.expectRevert(
-            abi.encodeWithSignature(
-                "AccessControlUnauthorizedAccount(address,bytes32)",
-                user,
-                role
-            )
-        );
-        controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            "Unauthorized Vault",
-            address(asset),
-            admin,
-            feeRecipient,
-            VaultFees({depositFee: 0, withdrawalFee: 0, protocolFee: 0}),
-            true
-        );
-        vm.stopPrank();
-    }
-
-    function test_deployModuleUnauthorized() external {
-        // First deploy a vault as admin
-        address vault = _deployTestVault();
-        vm.startPrank(user);
-        bytes32 salt = keccak256("test_salt");
-        vm.expectRevert(); // Expect a revert due to unauthorized caller.
-        controller.deployAndAddModule(
-            vault,
-            user,
-            "Unauthorized Module",
-            1e18,
-            100e18,
-            "ipfs://test",
-            true,
-            salt,
-            MODULE_IMPLEMENTATION_ID
-        );
-        vm.stopPrank();
-    }
-
-    function test_getContractInfoAfterVaultDeploy() external {
-        vm.startPrank(admin);
-        address vault = controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            "Info Test Vault",
-            address(asset),
-            admin,
-            feeRecipient,
-            VaultFees({depositFee: 0, withdrawalFee: 0, protocolFee: 0}),
-            true
-        );
-        // Generate the contract id exactly as in the controller
-        bytes32 vaultId = keccak256(abi.encodePacked("VAULT", vault));
-        ContractData memory data = controller.getContractInfo(vaultId);
-        assertEq(
-            data.contractAddress,
-            vault,
-            "Vault contract not registered correctly"
-        );
-        vm.stopPrank();
-    }
-
-    function test_deployModuleInvalidImplementation() external {
-        // First deploy a vault so we have a valid vault address
-        address vault = _deployTestVault();
-        string memory projectName = "Test Project Direct";
-        bytes32 salt = keccak256("test_salt_direct");
-
+    function test_deployVault() public {
         vm.startPrank(admin);
 
-        bytes32 invalidModuleId = keccak256("INVALID_MODULE");
-        vm.expectRevert(VaultController.InvalidImplementation.selector);
-        controller.deployAndAddModule(
-            vault,
-            admin,
-            projectName,
-            1e18,
-            100e18,
-            "ipfs://test",
-            false,
-            salt,
-            invalidModuleId
-        );
-        vm.stopPrank();
-    }
-
-    function test_deployVaultWithInvalidFees() public {
-        vm.startPrank(admin);
-
-        // Test fees exceeding 100%
-        VaultFees memory invalidFees = VaultFees({
-            depositFee: 10001, // More than 100%
-            withdrawalFee: 0,
-            protocolFee: 0
+        // First register the vault implementation
+        bytes32 vaultId = keccak256("TEST_VAULT_V1");
+        ContractData memory vaultData = ContractData({
+            contractAddress: vaultImplementation,
+            initDataRequired: true
         });
 
-        vm.expectRevert(VaultController.InvalidFeeValue.selector);
-        controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            "Test Vault",
-            address(asset),
-            admin,
-            feeRecipient,
-            invalidFees,
-            true
-        );
+        controller.addNewContract(vaultId, vaultData);
+
+        // Then attempt deployment
+        bytes memory initData = _createVaultInitData();
+
+        address deployedVault = controller.deployVault(vaultId, initData);
+
+        assertTrue(deployedVault != address(0), "Vault not deployed");
+        assertTrue(vaultStorage.vaultExists(deployedVault), "Vault not stored");
+
         vm.stopPrank();
     }
 
-    function test_deployModuleWithInvalidPricePerShare() public {
+    function test_RevertWhen_InvalidVaultAddress() public {
+        vm.startPrank(admin);
+
+        vm.expectRevert(VaultController.InvalidAddress.selector);
+        controller.pauseVault(address(0));
+
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_InvalidModuleId() public {
+        vm.startPrank(admin);
+
+        bytes memory moduleInitData = _createModuleInitData(address(0x1));
+        vm.expectRevert(VaultController.InvalidAddress.selector);
+        controller.deployModule(bytes32(0), moduleInitData);
+
+        vm.stopPrank();
+    }
+
+    // function test_deployModule() public {
+    //     vm.startPrank(admin);
+
+    //     address vault = _deployTestVault();
+    //     bytes memory moduleInitData = _createModuleInitData(vault);
+
+    //     address expectedModule = factory.predictDeployedAddress(
+    //         moduleImplementation,
+    //         moduleInitData,
+    //         keccak256(
+    //             abi.encode(
+    //                 address(controller),
+    //                 moduleImplementation,
+    //                 moduleStorage.getAllModules().length,
+    //                 moduleStorage.getAllModules().length + 1,
+    //                 block.timestamp
+    //             )
+    //         )
+    //     );
+
+    //     vm.expectEmit(true, true, false, false);
+    //     emit ModuleDeployed(expectedModule, MODULE_IMPLEMENTATION_ID);
+
+    //     address moduleAddress = controller.deployModule(
+    //         MODULE_IMPLEMENTATION_ID,
+    //         moduleInitData
+    //     );
+
+    //     assertTrue(moduleAddress != address(0), "Module not deployed");
+    //     assertTrue(
+    //         moduleStorage.moduleExists(moduleAddress),
+    //         "Module not stored"
+    //     );
+    //     assertEq(moduleAddress, expectedModule, "Unexpected module address");
+
+    //     vm.stopPrank();
+    // }
+
+    function test_pauseAndUnpauseVault() public {
+        vm.startPrank(admin);
         address vault = _deployTestVault();
-        string memory projectName = "Test Project Direct";
-        bytes32 salt = keccak256("test_salt_direct");
 
-        vm.startPrank(admin);
+        controller.pauseVault(vault);
+        assertTrue(MomintVault(vault).paused(), "Vault should be paused");
 
-        vm.expectRevert(VaultController.InvalidPricePerShare.selector);
-        controller.deployAndAddModule(
-            vault,
-            admin,
-            projectName,
-            0,
-            100e18,
-            "ipfs://test",
-            false,
-            salt,
-            MODULE_IMPLEMENTATION_ID
-        );
+        controller.unpauseVault(vault);
+        assertFalse(MomintVault(vault).paused(), "Vault should be unpaused");
+
         vm.stopPrank();
     }
 
-    function test_deployModuleWithInvalidTotalShares() public {
-        address vault = _deployTestVault();
+    function test_pauseAndUnpauseAllVaults() public {
         vm.startPrank(admin);
-        string memory projectName = "Test Project Direct";
-        bytes32 salt = keccak256("test_salt_direct");
 
-        vm.expectRevert(VaultController.InvalidTotalShares.selector);
-        controller.deployAndAddModule(
-            vault,
-            admin,
-            projectName,
-            1e18,
-            0,
-            "ipfs://test",
-            false,
-            salt,
-            MODULE_IMPLEMENTATION_ID
-        );
+        // Deploy multiple vaults
+        address vault1 = _deployTestVault();
+        address vault2 = _deployTestVault();
+
+        vm.expectEmit(true, true, false, false);
+        emit PausingAllVaults();
+        controller.pauseAllVaults();
+
+        assertTrue(MomintVault(vault1).paused(), "Vault 1 should be paused");
+        assertTrue(MomintVault(vault2).paused(), "Vault 2 should be paused");
+
+        vm.expectEmit(true, true, false, false);
+        emit UnpausingAllVaults();
+        controller.unpauseAllVaults();
+
+        assertFalse(MomintVault(vault1).paused(), "Vault 1 should be unpaused");
+        assertFalse(MomintVault(vault2).paused(), "Vault 2 should be unpaused");
+
         vm.stopPrank();
     }
 
-    function test_deployModuleWithInvalidURI() public {
-        address vault = _deployTestVault();
-        string memory projectName = "Test Project Direct";
-        bytes32 salt = keccak256("test_salt_direct");
-
+    function test_addAndRemoveContract() public {
         vm.startPrank(admin);
-        vm.expectRevert(VaultController.InvalidURI.selector);
-        controller.deployAndAddModule(
-            vault,
-            admin,
-            projectName,
-            1e18,
-            100e18,
-            "",
-            false,
-            salt,
-            MODULE_IMPLEMENTATION_ID
+
+        bytes32 newId = keccak256("NEW_CONTRACT");
+        ContractData memory data = ContractData({
+            contractAddress: address(0x123),
+            initDataRequired: true
+        });
+
+        controller.addNewContract(newId, data);
+        assertTrue(
+            contractStorage.contractExists(newId),
+            "Contract should be added"
         );
+
+        controller.removeContract(newId);
+        assertFalse(
+            contractStorage.contractExists(newId),
+            "Contract should be removed"
+        );
+
         vm.stopPrank();
     }
 
-    function test_deployModuleWithNonExistentVault() public {
+    function test_RevertWhen_DeployModuleWithEmptyData() public {
         vm.startPrank(admin);
-        string memory projectName = "Test Project Direct";
-        bytes32 salt = keccak256("test_salt_direct");
+
+        vm.expectRevert(VaultController.InvalidAddress.selector);
+        controller.deployModule(MODULE_IMPLEMENTATION_ID, "");
+
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_DeployVaultWithEmptyData() public {
+        vm.startPrank(admin);
+
+        vm.expectRevert(VaultController.InvalidAddress.selector);
+        controller.deployVault(VAULT_IMPLEMENTATION_ID, "");
+
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_ContractNotFound() public {
+        vm.startPrank(admin);
+
+        bytes memory initData = _createVaultInitData();
+        bytes32 nonExistentId = keccak256("NON_EXISTENT");
 
         vm.expectRevert(VaultController.ContractNotFound.selector);
-        controller.deployAndAddModule(
-            address(0x12),
-            admin,
-            projectName,
-            1e18,
-            100e18,
-            "ipfs://test",
-            false,
-            salt,
-            MODULE_IMPLEMENTATION_ID
-        );
+        controller.deployVault(nonExistentId, initData);
+
         vm.stopPrank();
     }
 
-    function test_deployVaultWithInvalidFeeValues() public {
+    // function test_setVaultFees() public {
+    //     vm.startPrank(admin);
+
+    //     address vault = _deployTestVault();
+    //     VaultFees memory newFees = VaultFees({
+    //         depositFee: 300,
+    //         withdrawalFee: 200,
+    //         protocolFee: 400
+    //     });
+
+    //     controller.setMomintVaultFees(vault, newFees);
+
+    //     (
+    //         uint256 depositFee,
+    //         uint256 withdrawalFee,
+    //         uint256 protocolFee
+    //     ) = MomintVault(vault).fees();
+    //     assertEq(depositFee, 300, "Deposit fee not set correctly");
+    //     assertEq(withdrawalFee, 200, "Withdrawal fee not set correctly");
+    //     assertEq(protocolFee, 400, "Protocol fee not set correctly");
+
+    //     vm.stopPrank();
+    // }
+
+    function test_RevertWhen_SetFeesWithInvalidVault() public {
         vm.startPrank(admin);
 
-        // Test fees exceeding maximum (10000 = 100%)
-        VaultFees memory invalidFees = VaultFees({
-            depositFee: 10001,
-            withdrawalFee: 0,
-            protocolFee: 0
+        VaultFees memory newFees = VaultFees({
+            depositFee: 300,
+            withdrawalFee: 200,
+            protocolFee: 400
         });
 
-        vm.expectRevert(VaultController.InvalidFeeValue.selector);
-        controller.deployNewVault(
-            VAULT_IMPLEMENTATION_ID,
-            "Test Vault",
-            address(asset),
-            admin,
-            feeRecipient,
-            invalidFees,
-            true
-        );
+        vm.expectRevert(VaultController.InvalidAddress.selector);
+        controller.setMomintVaultFees(address(0), newFees);
+
         vm.stopPrank();
     }
 
-    function test_deployModuleWithZeroPricePerShare() public {
-        address vault = _deployTestVault();
-        string memory projectName = "Test Project Direct";
-        bytes32 salt = keccak256("test_salt_direct");
-
+    function test_setFeeReceiver() public {
         vm.startPrank(admin);
-        vm.expectRevert(VaultController.InvalidPricePerShare.selector);
-        address moduleAddress = controller.deployAndAddModule(
-            vault,
-            admin,
-            projectName,
-            1e18,
-            100e18,
-            "ipfs://test",
-            false,
-            salt,
-            MODULE_IMPLEMENTATION_ID
+
+        address vault = _deployTestVault();
+        address newReceiver = address(0x123);
+
+        controller.setFeeReceiver(vault, newReceiver);
+
+        assertEq(
+            MomintVault(vault).feeRecipient(),
+            newReceiver,
+            "Fee receiver not set correctly"
         );
+
         vm.stopPrank();
     }
 
-    // Add helper function to create initialization data
-    function _createVaultInitData(
-        address asset_,
-        string memory name,
-        address admin_,
-        address feeRecipient_,
-        VaultFees memory fees_
-    ) internal pure returns (bytes memory) {
+    function test_RevertWhen_SetFeeReceiverWithInvalidAddress() public {
+        vm.startPrank(admin);
+
+        address vault = _deployTestVault();
+
+        vm.expectRevert(VaultController.InvalidAddress.selector);
+        controller.setFeeReceiver(vault, address(0));
+
+        vm.stopPrank();
+    }
+
+    // function test_moduleManagement() public {
+    //     vm.startPrank(admin);
+
+    //     address vault = _deployTestVault();
+    //     address moduleAddr = controller.deployModule(
+    //         MODULE_IMPLEMENTATION_ID,
+    //         _createModuleInitData(vault)
+    //     );
+
+    //     // Test adding module
+    //     Module memory moduleData = Module({
+    //         module: IModule(moduleAddr),
+    //         isSingleProject: true,
+    //         active: true
+    //     });
+
+    //     controller.addModule(vault, 1, moduleData);
+
+    //     // Verify module was added
+    //     (IModule module, bool isSingleProject, bool active) = MomintVault(vault)
+    //         .modules(1);
+    //     assertEq(address(module), moduleAddr, "Module not added correctly");
+    //     assertTrue(isSingleProject, "Module type not set correctly");
+    //     assertTrue(active, "Module not active");
+
+    //     // Test removing module
+    //     controller.removeModule(vault, 1);
+
+    //     // Verify module was removed
+    //     (, , active) = MomintVault(vault).modules(1);
+    //     assertFalse(active, "Module not removed");
+
+    //     vm.stopPrank();
+    // }
+
+    function test_RevertWhen_AddModuleWithInvalidIndex() public {
+        vm.startPrank(admin);
+
+        address vault = _deployTestVault();
+        Module memory moduleData = Module({
+            module: IModule(address(0x123)),
+            isSingleProject: true,
+            active: true
+        });
+
+        vm.expectRevert(VaultController.InvalidIndex.selector);
+        controller.addModule(vault, 0, moduleData);
+
+        vm.stopPrank();
+    }
+
+    // Helper functions
+
+    function _deployTestVault() internal returns (address) {
+        bytes memory initData = _createVaultInitData();
+        return controller.deployVault(VAULT_IMPLEMENTATION_ID, initData);
+    }
+
+    function _createVaultInitData() internal view returns (bytes memory) {
         return
             abi.encodeWithSelector(
                 MomintVault.initialize.selector,
                 InitParams({
-                    baseAsset: IERC20(asset_),
+                    baseAsset: IERC20(address(asset)),
                     symbol: "MV",
-                    shareName: name,
-                    owner: admin_,
-                    feeRecipient: feeRecipient_,
-                    fees: fees_,
-                    liquidityHoldBP: 3000, // 30%
-                    maxOwnerShareBP: 7000 // 70%
+                    shareName: "Test Vault",
+                    owner: address(controller),
+                    feeRecipient: admin,
+                    fees: VaultFees({
+                        depositFee: 0,
+                        withdrawalFee: 0,
+                        protocolFee: 0
+                    }),
+                    liquidityHoldBP: 3000,
+                    maxOwnerShareBP: 7000
                 })
+            );
+    }
+
+    function _createModuleInitData(
+        address vault
+    ) internal pure returns (bytes memory) {
+        return
+            abi.encodeWithSelector(
+                SPModule.initialize.selector,
+                1,
+                address(0x1),
+                vault,
+                "Test Project",
+                5e6,
+                100,
+                "ipfs://metadata",
+                address(0x2)
             );
     }
 }

@@ -3,124 +3,47 @@ pragma solidity 0.8.24;
 
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IMomintFactory, ContractData} from "../interfaces/IMomintFactory.sol";
 
 /// @title MomintFactory
-/// @notice Factory for deploying both vaults and modules with clone or direct deployment options
-contract MomintFactory is Ownable {
-    /// @notice Deployment types
-    enum DeploymentType {
-        CLONE,
-        DIRECT
-    }
+/// @author Momint
+/// @notice Factory contract for deploying minimal proxy vaults using EIP-1167
+/// @dev Uses OpenZeppelin's Clones library for minimal proxy pattern implementation
+///      and Ownable for access control. Each vault is deployed as a clone of a
+///      pre-deployed implementation contract to minimize gas costs.
+contract MomintFactory is Ownable, IMomintFactory {
+    /// @notice Emitted when a new vault clone is successfully deployed
+    /// @param contractAddress The address of the newly deployed contract clone
+    event ContractDeployed(address indexed contractAddress);
 
-    /// @notice Deployment configuration
-    struct DeployConfig {
-        address implementation;
-        bytes initData;
-        bytes32 salt;
-        DeploymentType deployType;
-        bytes creationCode; // Added for direct deployment
-    }
+    /// @notice Initializes the factory with an owner address
+    /// @dev Sets up access control by initializing Ownable with the provided owner
+    /// @param owner The address to be granted ownership rights
+    constructor(address owner) Ownable(owner) {}
 
-    event ContractDeployed(
-        address indexed newContract,
-        DeploymentType deployType,
-        bytes32 salt
-    );
-
-    error DeploymentFailed();
-    error InvalidImplementation();
-    error InvalidParameters();
-
-    constructor(address owner_) Ownable(owner_) {}
-
-    /// @notice Deploys a new contract using either cloning or direct deployment
-    /// @param config The deployment configuration
-    /// @return newContract The address of the newly deployed contract
-    function deploy(
-        DeployConfig calldata config
+    /// @notice Creates a new vault clone with optional initialization
+    /// @dev Uses deterministic deployment via CREATE2 to ensure predictable addresses
+    /// @param implementation_ Struct containing implementation address and init requirements
+    /// @param data_ Initialization calldata to be passed to the new vault (if required)
+    /// @param salt_ Unique value to ensure unique deployment addresses
+    /// @return newContract Address of the newly deployed contract clone
+    /// @custom:security Only callable by owner
+    /// @custom:throws VaultDeployInitFailed if initialization fails when required
+    function deployContract(
+        ContractData calldata implementation_,
+        bytes calldata data_,
+        bytes32 salt_
     ) external onlyOwner returns (address newContract) {
-        if (config.implementation == address(0)) revert InvalidImplementation();
-        emit ContractDeployed(newContract, config.deployType, config.salt);
-
-        if (config.deployType == DeploymentType.CLONE) {
-            newContract = _deployClone(
-                config.implementation,
-                config.initData,
-                config.salt
-            );
-        } else {
-            newContract = _deployDirect(
-                config.creationCode,
-                config.initData,
-                config.salt
-            );
-        }
-
-        return newContract;
-    }
-
-    /// @notice Deploys a contract using cloning
-    function _deployClone(
-        address implementation,
-        bytes memory initData,
-        bytes32 salt
-    ) internal returns (address newContract) {
-        if (implementation == address(0)) revert InvalidImplementation();
-        if (salt == bytes32(0)) revert InvalidParameters();
-        if (initData.length == 0) revert InvalidParameters();
-        newContract = Clones.cloneDeterministic(implementation, salt);
-
-        if (initData.length > 0) {
-            // slither-disable-next-line missing-zero-check
-            (bool success, ) = newContract.call(initData);
-            if (!success) revert DeploymentFailed();
-        }
-
-        return newContract;
-    }
-
-    /// @notice Deploys a contract directly using CREATE2
-    function _deployDirect(
-        bytes memory creationCode,
-        bytes memory constructorArgs,
-        bytes32 salt
-    ) internal returns (address deployed) {
-        if (creationCode.length == 0) revert InvalidParameters();
-        if (constructorArgs.length == 0) revert InvalidParameters();
-        if (salt == bytes32(0)) revert InvalidParameters();
-        // Use abi.encode instead of abi.encodePacked for safer encoding
-        bytes memory bytecode = abi.encode(creationCode, constructorArgs);
-
-        assembly {
-            deployed := create2(0, add(bytecode, 0x20), mload(bytecode), salt)
-        }
-
-        require(deployed != address(0), "Failed to deploy contract");
-        return deployed;
-    }
-
-    /// @notice Predicts the address where a contract will be deployed
-    function predictDeploymentAddress(
-        bytes32 salt,
-        bytes memory creationCode,
-        bytes memory constructorArgs
-    ) public view returns (address) {
-        if (creationCode.length == 0) revert InvalidParameters();
-        if (constructorArgs.length == 0) revert InvalidParameters();
-        if (salt == bytes32(0)) revert InvalidParameters();
-        // Use abi.encode instead of abi.encodePacked for safer encoding
-        bytes memory bytecode = abi.encode(creationCode, constructorArgs);
-
-        bytes32 hash = keccak256(
-            abi.encodePacked(
-                bytes1(0xff),
-                address(this),
-                salt,
-                keccak256(bytecode)
-            )
+        newContract = Clones.cloneDeterministic(
+            implementation_.contractAddress,
+            salt_
         );
-
-        return address(uint160(uint256(hash)));
+        emit ContractDeployed(newContract);
+        if (implementation_.initDataRequired) {
+            (bool success, ) = newContract.call(data_);
+            if (!success) {
+                revert("DeployInitFailed");
+            }
+        }
     }
 }

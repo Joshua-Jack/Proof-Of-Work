@@ -159,6 +159,11 @@ contract MomintVault is
         maxOwnerShareBP = params.maxOwnerShareBP;
     }
 
+    function setFeeRecipient(address newFeeRecipient) external onlyOwner {
+        emit FeeRecipientSet(feeRecipient, newFeeRecipient);
+        feeRecipient = newFeeRecipient;
+    }
+
     function decimals() public view override returns (uint8) {
         return _decimals;
     }
@@ -276,20 +281,24 @@ contract MomintVault is
     }
 
     // ============ Withdrawal Functions ============
-    function withdraw(uint256 shares) external returns (uint256) {
-        return withdraw(shares, msg.sender);
+    function withdraw(
+        uint256 shares,
+        uint256 index_
+    ) external returns (uint256) {
+        return withdraw(shares, msg.sender, index_);
     }
 
     function withdraw(
         uint256 shares,
-        address receiver
+        address receiver,
+        uint256 index_
     ) public nonReentrant whenNotPaused returns (uint256 assets) {
         if (shares == 0) revert InvalidAmount();
         if (receiver == address(0)) revert InvalidReceiver();
         if (modules.length == 0) revert NoActiveModules();
         if (balanceOf(msg.sender) < shares) revert InsufficientBalance();
 
-        Module storage activeModule = modules[0];
+        Module storage activeModule = modules[index_];
         if (!activeModule.active) revert NoActiveModules();
 
         // Get divestment amount first to check liquidity
@@ -513,6 +522,10 @@ contract MomintVault is
 
     function getModulesLength() external view returns (uint256) {
         return modules.length;
+    }
+
+    function getModules() external view returns (Module[] memory) {
+        return modules;
     }
 
     function getVaultFees() public view returns (VaultFees memory) {

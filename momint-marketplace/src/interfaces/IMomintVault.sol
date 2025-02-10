@@ -66,12 +66,24 @@ interface IMomintVault {
     );
     event FeeCollected(address indexed user, uint256 amount);
     event Refund(address indexed user, uint256 amount);
+    event FeeRecipientSet(
+        address indexed oldRecipient,
+        address indexed newRecipient
+    );
 
     function setVaultFees(VaultFees calldata newFees_) external;
 
     function addModule(
         Module memory newModule,
-        bool isSingleProject,
-        uint256 projectId
+        bool replace,
+        uint256 index
     ) external;
+
+    function removeModule(uint256 index) external;
+
+    function pause() external;
+
+    function unpause() external;
+
+    function setFeeRecipient(address newFeeRecipient) external;
 }

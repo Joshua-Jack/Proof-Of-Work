@@ -63,8 +63,8 @@ contract TestSetup is Test, Global {
     }
 
     function _setupModule() internal {
-        spModule = new SPModule(
-            1,
+        spModule = new SPModule();
+        spModule.initialize(
             admin,
             address(vaultAddress),
             "Test Project",
@@ -80,22 +80,20 @@ contract TestSetup is Test, Global {
     function _createMockModule(
         address admin_
     ) internal returns (Module memory) {
+        spModule = new SPModule();
+        spModule.initialize(
+            admin,
+            address(vaultAddress),
+            "Test Project",
+            5e6,
+            100,
+            "ipfs://metadata",
+            user3
+        );
+        spModuleAddress = address(spModule);
         return
             Module({
-                module: IModule(
-                    address(
-                        new SPModule(
-                            1,
-                            admin_,
-                            address(vault),
-                            "Test Project",
-                            5e6,
-                            100,
-                            "ipfs://metadata",
-                            user3
-                        )
-                    )
-                ),
+                module: IModule(address(spModuleAddress)),
                 isSingleProject: true,
                 active: false // Will be set to true when added
             });

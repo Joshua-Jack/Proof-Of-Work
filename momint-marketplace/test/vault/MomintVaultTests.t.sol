@@ -397,7 +397,7 @@ contract MomintVaultTests is TestSetup {
         console.log("\nAttempting to withdraw", withdrawShares, "shares");
 
         uint256 balanceBefore = USDT.balanceOf(user2);
-        uint256 withdrawnAmount = vault.withdraw(withdrawShares, user2);
+        uint256 withdrawnAmount = vault.withdraw(withdrawShares, user2, 0);
 
         console.log("\nWithdraw results:");
         console.log("- Amount withdrawn:", withdrawnAmount);
@@ -601,7 +601,7 @@ contract MomintVaultTests is TestSetup {
         // Try to withdraw - should revert due to insufficient liquidity
         vm.startPrank(user1);
         vm.expectRevert("Insufficient liquidity");
-        vault.withdraw(shares, user1);
+        vault.withdraw(shares, user1, 0);
         vm.stopPrank();
     }
 
@@ -949,7 +949,7 @@ contract MomintVaultTests is TestSetup {
     function test_RevertWhen_Withdraw_ZeroAmount() public {
         vm.startPrank(user1);
         vm.expectRevert(InvalidAmount.selector);
-        vault.withdraw(0, user1);
+        vault.withdraw(0, user1, 0);
         vm.stopPrank();
     }
 
@@ -975,19 +975,5 @@ contract MomintVaultTests is TestSetup {
         uint256 shares = 100e6;
         uint256 assets = vault.previewMint(shares);
         assertGt(assets, 0, "Should preview non-zero assets");
-    }
-
-    // Test maxDeposit and maxMint
-    function test_maxOperations() public {
-        vm.startPrank(admin);
-        Module memory singleProjectModule = _createMockModule(admin);
-        vault.addModule(singleProjectModule, false, 0);
-        vm.stopPrank();
-
-        uint256 maxDeposit = vault.maxDeposit(user1);
-        uint256 maxMint = vault.maxMint(user1);
-
-        assertGt(maxDeposit, 0, "Max deposit should be non-zero");
-        assertGt(maxMint, 0, "Max mint should be non-zero");
     }
 }

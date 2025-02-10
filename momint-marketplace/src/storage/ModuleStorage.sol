@@ -1,93 +1,63 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IModuleStorage} from "../interfaces/IModuleStorage.sol";
 
-contract ModuleStorage is Ownable {
-    struct ModuleInfo {
-        address moduleAddress;
-        uint256 projectId;
-        string name;
-        address vault;
-        bool active;
-        uint256 deployedAt;
-    }
-
-    mapping(address => ModuleInfo) public modules;
-    mapping(address => address[]) public vaultModules; // vault -> modules
+contract ModuleStorage is Ownable, IModuleStorage {
+    uint256 public maxModules = 1000;
     address[] public moduleList;
     uint256 public currentProjectId;
-    event ModuleStored(
-        address indexed module,
-        uint256 projectId,
-        string name,
-        address vault
-    );
+
+    mapping(address => bool) public moduleExists;
+    mapping(bytes32 => address) public module;
+
+    event ModuleStored(address indexed module, bytes32 indexed moduleId);
     event ModuleRemoved(address indexed module);
 
     error ModuleAlreadyStored();
     error ModuleNotStored();
+    error InvalidAddress();
+    error MaxModulesReached(uint256 maxModules);
+    error ModuleDoesNotExist(bytes32 moduleId);
 
     /// @param owner_ The address of the contract owner.
     constructor(address owner_) Ownable(owner_) {}
 
     // slither-disable-next-line timestamp
     function storeModule(
-        address module,
-        string memory name,
-        address vault
+        address module_,
+        bytes32 moduleId_
     ) external onlyOwner {
-        if (modules[module].moduleAddress != address(0))
-            revert ModuleAlreadyStored();
+        if (module_ == address(0)) revert InvalidAddress();
+        if (moduleExists[module_]) revert ModuleAlreadyStored();
+        emit ModuleStored(module_, moduleId_);
 
-        currentProjectId++; // Increment the counter
-
-        modules[module] = ModuleInfo({
-            moduleAddress: module,
-            projectId: currentProjectId, // Use the counter
-            name: name,
-            vault: vault,
-            active: true,
-            deployedAt: block.timestamp
-        });
-        moduleList.push(module);
-        vaultModules[vault].push(module);
-
-        emit ModuleStored(module, currentProjectId, name, vault);
+        moduleExists[module_] = true;
+        module[moduleId_] = module_;
+        moduleList.push(module_);
+        if (moduleList.length > maxModules)
+            revert MaxModulesReached(moduleList.length);
     }
 
     // slither-disable-next-line timestamp
-    function removeModule(address module) external onlyOwner {
-        if (modules[module].moduleAddress == address(0))
-            revert ModuleNotStored();
-        modules[module].active = false;
-        emit ModuleRemoved(module);
+    function removeModule(
+        address module_,
+        bytes32 moduleId_
+    ) external onlyOwner {
+        if (!moduleExists[module_]) revert ModuleNotStored();
+        if (module[moduleId_] == address(0)) revert InvalidAddress();
+        delete moduleExists[module_];
+        delete module[moduleId_];
+        emit ModuleRemoved(module_);
     }
 
-    function getAllModules() external view returns (ModuleInfo[] memory) {
-        uint256 totalLength = moduleList.length;
-        ModuleInfo[] memory allModules = new ModuleInfo[](totalLength);
-        for (uint i = 0; i < totalLength; i++) {
-            allModules[i] = modules[moduleList[i]];
-        }
-        return allModules;
+    function getAllModules() external view returns (address[] memory) {
+        return moduleList;
     }
 
-    function getModule(
-        address module
-    ) external view returns (ModuleInfo memory) {
-        return modules[module];
-    }
-
-    function getVaultModules(
-        address vault
-    ) external view returns (ModuleInfo[] memory) {
-        address[] memory vaultModuleList = vaultModules[vault];
-        ModuleInfo[] memory moduleInfos = new ModuleInfo[](
-            vaultModuleList.length
-        );
-        for (uint i = 0; i < vaultModuleList.length; i++) {
-            moduleInfos[i] = modules[vaultModuleList[i]];
-        }
-        return moduleInfos;
+    function getModule(bytes32 moduleId_) external view returns (address) {
+        if (module[moduleId_] == address(0))
+            revert ModuleDoesNotExist(moduleId_);
+        return module[moduleId_];
     }
 }

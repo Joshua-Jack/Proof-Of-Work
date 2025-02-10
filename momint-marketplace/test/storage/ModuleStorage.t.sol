@@ -10,14 +10,9 @@ contract ModuleStorageTest is Test {
     address public admin = address(0x1);
     address public user = address(0x2);
     address public module = address(0x3);
-    address public vault = address(0x4);
+    bytes32 public moduleId = keccak256("TEST_MODULE");
 
-    event ModuleStored(
-        address indexed module,
-        uint256 projectId,
-        string name,
-        address vault
-    );
+    event ModuleStored(address indexed module, bytes32 indexed moduleId);
     event ModuleRemoved(address indexed module);
 
     function setUp() public {
@@ -27,20 +22,14 @@ contract ModuleStorageTest is Test {
     function test_StoreModule() public {
         vm.startPrank(admin);
 
-        string memory name = "Test Module";
-
         vm.expectEmit(true, true, true, true);
-        emit ModuleStored(module, 1, name, vault);
+        emit ModuleStored(module, moduleId);
 
-        moduleStorage.storeModule(module, name, vault);
+        moduleStorage.storeModule(module, moduleId);
 
-        ModuleStorage.ModuleInfo memory info = moduleStorage.getModule(module);
-        assertEq(info.moduleAddress, module);
-        assertEq(info.projectId, 1);
-        assertEq(info.name, name);
-        assertEq(info.vault, vault);
-        assertTrue(info.active);
-        assertTrue(info.deployedAt > 0);
+        assertTrue(moduleStorage.moduleExists(module));
+        assertEq(moduleStorage.module(moduleId), module);
+        assertEq(moduleStorage.getAllModules()[0], module);
 
         vm.stopPrank();
     }
@@ -48,17 +37,15 @@ contract ModuleStorageTest is Test {
     function test_RemoveModule() public {
         vm.startPrank(admin);
 
-        moduleStorage.storeModule(module, "Test Module", vault);
+        moduleStorage.storeModule(module, moduleId);
 
         vm.expectEmit(true, false, false, false);
         emit ModuleRemoved(module);
 
-        moduleStorage.removeModule(module);
+        moduleStorage.removeModule(module, moduleId);
 
-        ModuleStorage.ModuleInfo memory info = moduleStorage.getModule(module);
-        assertFalse(info.active);
-        assertEq(info.moduleAddress, module);
-        assertEq(info.vault, vault);
+        assertFalse(moduleStorage.moduleExists(module));
+        assertEq(moduleStorage.module(moduleId), address(0));
 
         vm.stopPrank();
     }
@@ -67,68 +54,53 @@ contract ModuleStorageTest is Test {
         vm.startPrank(admin);
 
         // Test empty list first
-        ModuleStorage.ModuleInfo[] memory emptyModules = moduleStorage
-            .getAllModules();
+        address[] memory emptyModules = moduleStorage.getAllModules();
         assertEq(emptyModules.length, 0);
 
         // Store multiple modules
         address module2 = address(0x5);
-        moduleStorage.storeModule(module, "Test Module 1", vault);
-        moduleStorage.storeModule(module2, "Test Module 2", vault);
+        bytes32 moduleId2 = keccak256("TEST_MODULE_2");
+        moduleStorage.storeModule(module, moduleId);
+        moduleStorage.storeModule(module2, moduleId2);
 
-        // Test active modules
-        ModuleStorage.ModuleInfo[] memory activeModules = moduleStorage
-            .getAllModules();
-        assertEq(activeModules.length, 2);
-        assertEq(activeModules[0].moduleAddress, module);
-        assertEq(activeModules[1].moduleAddress, module2);
-        assertTrue(activeModules[0].active);
-        assertTrue(activeModules[1].active);
-
-        // Remove one module and verify list still contains both but one is inactive
-        moduleStorage.removeModule(module);
-        ModuleStorage.ModuleInfo[] memory mixedModules = moduleStorage
-            .getAllModules();
-        assertEq(mixedModules.length, 2);
-        assertFalse(mixedModules[0].active);
-        assertTrue(mixedModules[1].active);
+        // Test stored modules
+        address[] memory modules = moduleStorage.getAllModules();
+        assertEq(modules.length, 2);
+        assertEq(modules[0], module);
+        assertEq(modules[1], module2);
 
         vm.stopPrank();
     }
 
-    function test_GetVaultModules() public {
+    function test_GetModule() public {
         vm.startPrank(admin);
 
-        // Test empty list
-        ModuleStorage.ModuleInfo[] memory emptyModules = moduleStorage
-            .getVaultModules(vault);
-        assertEq(emptyModules.length, 0);
+        moduleStorage.storeModule(module, moduleId);
 
-        // Store modules for different vaults
-        address vault2 = address(0x6);
-        moduleStorage.storeModule(module, "Test Module 1", vault);
-        moduleStorage.storeModule(address(0x5), "Test Module 2", vault2);
-
-        // Test modules for specific vault
-        ModuleStorage.ModuleInfo[] memory vaultModules = moduleStorage
-            .getVaultModules(vault);
-        assertEq(vaultModules.length, 1);
-        assertEq(vaultModules[0].moduleAddress, module);
-        assertEq(vaultModules[0].vault, vault);
+        address retrievedModule = moduleStorage.getModule(moduleId);
+        assertEq(retrievedModule, module);
 
         vm.stopPrank();
     }
 
-    function test_ProjectIdIncrement() public {
+    function test_MaxModules() public {
         vm.startPrank(admin);
 
-        assertEq(moduleStorage.currentProjectId(), 0);
+        // Store up to max modules
+        for (uint256 i = 0; i < moduleStorage.maxModules(); i++) {
+            address newModule = address(uint160(i + 1));
+            bytes32 newModuleId = keccak256(abi.encodePacked(i));
+            moduleStorage.storeModule(newModule, newModuleId);
+        }
 
-        moduleStorage.storeModule(module, "Test Module 1", vault);
-        assertEq(moduleStorage.currentProjectId(), 1);
-
-        moduleStorage.storeModule(address(0x5), "Test Module 2", vault);
-        assertEq(moduleStorage.currentProjectId(), 2);
+        // Try to store one more
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ModuleStorage.MaxModulesReached.selector,
+                1001
+            )
+        );
+        moduleStorage.storeModule(address(0x999), keccak256("OVERFLOW"));
 
         vm.stopPrank();
     }
@@ -139,31 +111,31 @@ contract ModuleStorageTest is Test {
         vm.expectRevert(
             abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
         );
-        moduleStorage.storeModule(module, "Test Module", vault);
+        moduleStorage.storeModule(module, moduleId);
 
         vm.stopPrank();
     }
 
     function test_RevertUnauthorizedRemove() public {
         vm.startPrank(admin);
-        moduleStorage.storeModule(module, "Test Module", vault);
+        moduleStorage.storeModule(module, moduleId);
         vm.stopPrank();
 
         vm.startPrank(user);
         vm.expectRevert(
             abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user)
         );
-        moduleStorage.removeModule(module);
+        moduleStorage.removeModule(module, moduleId);
         vm.stopPrank();
     }
 
     function test_RevertDuplicateModule() public {
         vm.startPrank(admin);
 
-        moduleStorage.storeModule(module, "Test Module", vault);
+        moduleStorage.storeModule(module, moduleId);
 
         vm.expectRevert(ModuleStorage.ModuleAlreadyStored.selector);
-        moduleStorage.storeModule(module, "Duplicate Module", vault);
+        moduleStorage.storeModule(module, moduleId);
 
         vm.stopPrank();
     }
@@ -172,7 +144,31 @@ contract ModuleStorageTest is Test {
         vm.startPrank(admin);
 
         vm.expectRevert(ModuleStorage.ModuleNotStored.selector);
-        moduleStorage.removeModule(address(0x123));
+        moduleStorage.removeModule(address(0x123), moduleId);
+
+        vm.stopPrank();
+    }
+
+    function test_RevertInvalidAddress() public {
+        vm.startPrank(admin);
+
+        vm.expectRevert(ModuleStorage.InvalidAddress.selector);
+        moduleStorage.storeModule(address(0), moduleId);
+
+        vm.stopPrank();
+    }
+
+    function test_RevertModuleDoesNotExist() public {
+        vm.startPrank(admin);
+
+        bytes32 nonExistentId = keccak256("NON_EXISTENT");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ModuleStorage.ModuleDoesNotExist.selector,
+                nonExistentId
+            )
+        );
+        moduleStorage.getModule(nonExistentId);
 
         vm.stopPrank();
     }

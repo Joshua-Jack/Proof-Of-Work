@@ -12,150 +12,21 @@ import {SPModule} from "../modules/SPModule.sol";
 import {ContractData} from "../interfaces/IContractStorage.sol";
 import {MomintVault} from "../vault/MomintVault.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IContractStorage} from "../interfaces/IContractStorage.sol";
+import {IVaultStorage} from "../interfaces/IVaultStorage.sol";
+import {IModuleStorage} from "../interfaces/IModuleStorage.sol";
+import {IMomintFactory} from "../interfaces/IMomintFactory.sol";
 
 contract VaultController is AccessControl, ReentrancyGuard {
     bytes32 public constant VAULT_CONTROLLER_ROLE =
         keccak256("VAULT_CONTROLLER");
 
-    VaultStorage public vaultStorage;
-    ModuleStorage public moduleStorage;
-    ContractStorage public contractStorage;
-    MomintFactory public factory;
+    IMomintFactory immutable factory;
+    IModuleStorage immutable moduleStorage;
+    IContractStorage immutable contractStorage;
+    IVaultStorage immutable vaultStorage;
+    IMomintVault immutable momintVault;
 
-    event VaultDeployed(
-        address indexed vault,
-        string name,
-        address asset,
-        bool isClone
-    );
-    event ModuleDeployed(
-        address indexed module,
-        address indexed vault,
-        string name,
-        bool isClone
-    );
-    event RegistriesSet(
-        address vaultStorage,
-        address moduleStorage,
-        address contractStorage,
-        address factory
-    );
-
-    error UnauthorizedCaller();
-    error InvalidAddress();
-    error DeploymentFailed();
-    error InvalidImplementation();
-    error ContractNotFound();
-    error InvalidFees();
-    error InvalidPricePerShare();
-    error InvalidTotalShares();
-    error InvalidURI();
-    error InvalidFeeValue();
-
-    constructor(address admin) {
-        if (admin == address(0)) revert UnauthorizedCaller();
-        _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(VAULT_CONTROLLER_ROLE, admin);
-    }
-
-    function setRegistries(
-        address vaultStorage_,
-        address moduleStorage_,
-        address contractStorage_,
-        address factory_
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (
-            vaultStorage_ == address(0) ||
-            moduleStorage_ == address(0) ||
-            contractStorage_ == address(0) ||
-            factory_ == address(0)
-        ) revert InvalidAddress();
-
-        vaultStorage = VaultStorage(vaultStorage_);
-        moduleStorage = ModuleStorage(moduleStorage_);
-        contractStorage = ContractStorage(contractStorage_);
-        factory = MomintFactory(factory_);
-
-        emit RegistriesSet(
-            vaultStorage_,
-            moduleStorage_,
-            contractStorage_,
-            factory_
-        );
-    }
-
-    function deployNewVault(
-        bytes32 implementationId,
-        string memory name,
-        address asset,
-        address admin,
-        address feeRecipient,
-        VaultFees memory fees,
-        bool useClone
-    )
-        external
-        nonReentrant
-        onlyRole(VAULT_CONTROLLER_ROLE)
-        returns (address newVault)
-    {
-        if (asset == address(0)) revert InvalidAddress();
-        if (feeRecipient == address(0)) revert InvalidAddress();
-        if (admin == address(0)) revert InvalidAddress();
-        if (
-            fees.depositFee > 10000 || // Max 100%
-            fees.withdrawalFee > 10000 || // Max 100%
-            fees.protocolFee > 10000 // Max 100%
-        ) revert InvalidFeeValue();
-        ContractData memory implData = contractStorage.getContract(
-            implementationId
-        );
-        if (implData.contractAddress == address(0)) revert ContractNotFound();
-
-        // Prepare initialization data
-        bytes memory initData = abi.encodeWithSelector(
-            MomintVault.initialize.selector,
-            asset,
-            string(abi.encodePacked("mv", name)),
-            name,
-            admin,
-            feeRecipient,
-            fees
-        );
-
-        // Generate deterministic salt
-        bytes32 salt = keccak256(abi.encodePacked(name, block.timestamp));
-
-        MomintFactory.DeployConfig memory config = MomintFactory.DeployConfig({
-            implementation: implData.contractAddress,
-            initData: initData,
-            salt: salt,
-            deployType: useClone
-                ? MomintFactory.DeploymentType.CLONE
-                : MomintFactory.DeploymentType.DIRECT,
-            creationCode: useClone ? bytes("") : type(MomintVault).creationCode
-        });
-
-        try factory.deploy(config) returns (address vault) {
-            newVault = vault;
-        } catch {
-            revert DeploymentFailed();
-        }
-
-        // Store vault information
-        vaultStorage.storeVault(newVault, name, asset);
-
-        // Store contract information
-        bytes32 vaultId = keccak256(abi.encodePacked("VAULT", newVault));
-        contractStorage.addContract(
-            vaultId,
-            ContractData({contractAddress: newVault, initDataRequired: true})
-        );
-
-        emit VaultDeployed(newVault, name, asset, useClone);
-        return newVault;
-    }
-
-    // Create a struct to hold deployment parameters
     struct ModuleDeploymentParams {
         address vault;
         address owner;
@@ -168,103 +39,211 @@ contract VaultController is AccessControl, ReentrancyGuard {
         bytes32 moduleImplementationId;
     }
 
-    function deployAndAddModule(
-        address vault,
-        address owner,
-        string memory name,
-        uint256 pricePerShare,
-        uint256 totalShares,
-        string memory uri,
-        bool isClone,
-        bytes32 salt,
-        bytes32 moduleImplementationId
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) returns (address) {
-        if (vault == address(0)) revert InvalidAddress();
-        if (owner == address(0)) revert InvalidAddress();
-        if (pricePerShare == 0) revert InvalidPricePerShare();
-        if (totalShares == 0) revert InvalidTotalShares();
-        if (bytes(uri).length == 0) revert InvalidURI();
+    event VaultDeployed(address indexed vault, bytes32 indexed vaultId);
+    event ModuleDeployed(address indexed module, bytes32 indexed moduleId);
+    event PausingAllVaults();
+    event UnpausingAllVaults();
+    event RegistriesSet(
+        address vaultStorage,
+        address moduleStorage,
+        address contractStorage,
+        address factory
+    );
+    event VaultPaused(address indexed vault);
+    event VaultUnpaused(address indexed vault);
+    event AddingNewContract(bytes32 indexed id, ContractData);
+    event RemovingContract(bytes32 indexed id);
 
-        ModuleDeploymentParams memory params = ModuleDeploymentParams({
-            vault: vault,
-            owner: owner,
-            name: name,
-            pricePerShare: pricePerShare,
-            totalShares: totalShares,
-            uri: uri,
-            isClone: isClone,
-            salt: salt,
-            moduleImplementationId: moduleImplementationId
-        });
+    error UnauthorizedCaller();
+    error InvalidAddress();
+    error DeploymentFailed();
+    error InvalidImplementation();
+    error ContractNotFound();
+    error InvalidFees();
+    error InvalidPricePerShare();
+    error InvalidTotalShares();
+    error InvalidURI();
+    error InvalidFeeValue();
+    error VaultNotStored();
+    error InvalidModuleId();
+    error InvalidIndex();
 
-        return _deployAndAddModule(params);
+    constructor(
+        address admin,
+        address factory_,
+        address moduleStorage_,
+        address contractStorage_,
+        address vaultStorage_
+    ) {
+        if (admin == address(0)) revert UnauthorizedCaller();
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(VAULT_CONTROLLER_ROLE, admin);
+        factory = IMomintFactory(factory_);
+        moduleStorage = IModuleStorage(moduleStorage_);
+        contractStorage = IContractStorage(contractStorage_);
+        vaultStorage = IVaultStorage(vaultStorage_);
     }
 
-    function getVaultInfo(
-        address vault
-    ) public view returns (VaultStorage.VaultInfo memory) {
-        return vaultStorage.getVault(vault);
+    // Deployment Functions
+    function deployModule(
+        bytes32 id_,
+        bytes calldata data_
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
+        if (id_ == bytes32(0)) revert InvalidAddress();
+        if (data_.length == 0) revert InvalidAddress();
+        _moduleDeploymentHandler(id_, data_);
     }
 
-    function getModuleInfo(
-        address module
-    ) external view returns (ModuleStorage.ModuleInfo memory) {
-        return moduleStorage.getModule(module);
-    }
+    function _moduleDeploymentHandler(
+        bytes32 id_,
+        bytes calldata data_
+    ) internal {
+        if (id_ == bytes32(0)) revert InvalidAddress();
+        if (data_.length == 0) revert InvalidAddress();
+        ContractData memory contractData = contractStorage.getContract(id_);
 
-    function getContractInfo(
-        bytes32 id
-    ) public view returns (ContractData memory) {
-        return contractStorage.getContract(id);
-    }
-
-    function _deployAndAddModule(
-        ModuleDeploymentParams memory params
-    ) internal returns (address) {
-        VaultStorage.VaultInfo memory vaultInfo = getVaultInfo(params.vault);
-        if (vaultInfo.vaultAddress == address(0)) {
+        if (contractData.contractAddress == address(0))
             revert ContractNotFound();
-        }
-        ContractData memory moduleImpl = getContractInfo(
-            params.moduleImplementationId
+        uint256 totalModules = moduleStorage.getAllModules().length;
+        uint256 newProjectId = moduleStorage.getAllModules().length + 1;
+
+        bytes32 salt = keccak256(
+            abi.encode(
+                address(this),
+                contractData.contractAddress,
+                totalModules,
+                newProjectId,
+                block.timestamp
+            )
         );
-        if (moduleImpl.contractAddress == address(0)) {
-            revert InvalidImplementation();
-        }
-        bytes memory constructorArgs = abi.encode(
-            params.vault,
-            params.owner,
-            params.name,
-            params.pricePerShare,
-            params.totalShares,
-            params.uri,
-            params.owner
+        address newModule = factory.deployContract(contractData, data_, salt);
+        moduleStorage.storeModule(newModule, id_);
+        emit ModuleDeployed(newModule, id_);
+    }
+
+    function deployVault(
+        bytes32 id_,
+        bytes calldata data_
+    )
+        external
+        onlyRole(VAULT_CONTROLLER_ROLE)
+        returns (address newVaultAddress)
+    {
+        if (id_ == bytes32(0)) revert InvalidAddress();
+        if (data_.length == 0) revert InvalidAddress();
+        newVaultAddress = _vaultDeploymentHandler(id_, data_);
+    }
+
+    function _vaultDeploymentHandler(
+        bytes32 id_,
+        bytes calldata data_
+    ) internal returns (address newVaultAddress) {
+        if (id_ == bytes32(0)) revert InvalidAddress();
+        if (data_.length == 0) revert InvalidAddress();
+        ContractData memory contractData = contractStorage.getContract(id_);
+
+        if (contractData.contractAddress == address(0))
+            revert ContractNotFound();
+
+        uint256 totalVaults = vaultStorage.getAllVaults().length;
+        uint256 newVaultId = vaultStorage.getAllVaults().length + 1;
+
+        bytes32 salt = keccak256(
+            abi.encode(
+                address(this),
+                contractData.contractAddress,
+                totalVaults,
+                newVaultId,
+                block.timestamp
+            )
         );
-        MomintFactory.DeployConfig memory config;
-        address module;
-        if (params.isClone) {
-            config = MomintFactory.DeployConfig({
-                implementation: moduleImpl.contractAddress,
-                initData: constructorArgs,
-                salt: params.salt,
-                deployType: MomintFactory.DeploymentType.CLONE,
-                creationCode: ""
-            });
-        } else {
-            config = MomintFactory.DeployConfig({
-                implementation: moduleImpl.contractAddress,
-                initData: constructorArgs,
-                salt: params.salt,
-                deployType: MomintFactory.DeploymentType.DIRECT,
-                creationCode: type(SPModule).creationCode
-            });
+        address newVault = factory.deployContract(contractData, data_, salt);
+        vaultStorage.storeVault(newVault, id_);
+        emit VaultDeployed(newVault, id_);
+        return newVault;
+    }
+
+    // Emergency Functions
+    function pauseVault(
+        address vault
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
+        if (vault == address(0)) revert InvalidAddress();
+        IMomintVault(vault).pause();
+    }
+
+    function unpauseVault(
+        address vault
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
+        if (vault == address(0)) revert InvalidAddress();
+        IMomintVault(vault).unpause();
+    }
+
+    function pauseAllVaults() external onlyRole(VAULT_CONTROLLER_ROLE) {
+        emit PausingAllVaults();
+        address[] memory vaults = vaultStorage.getAllVaults();
+        for (uint256 i = 0; i < vaults.length; i++) {
+            IMomintVault(vaults[i]).pause();
         }
-        module = factory.deploy(config);
-        if (module == address(0)) {
-            revert DeploymentFailed();
+    }
+
+    function unpauseAllVaults() external onlyRole(VAULT_CONTROLLER_ROLE) {
+        emit UnpausingAllVaults();
+        address[] memory vaults = vaultStorage.getAllVaults();
+        for (uint256 i = 0; i < vaults.length; i++) {
+            IMomintVault(vaults[i]).unpause();
         }
-        moduleStorage.storeModule(module, params.name,params.vault);
-        emit ModuleDeployed(module, params.vault, params.name, params.isClone);
-        return module;
-    } 
+    }
+
+    // Utility Functions
+
+    function addNewContract(
+        bytes32 id_,
+        ContractData calldata data
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
+        if (id_ == bytes32(0)) revert InvalidAddress();
+        if (data.contractAddress == address(0)) revert InvalidAddress();
+        emit AddingNewContract(id_, data);
+        contractStorage.addContract(id_, data);
+    }
+
+    function removeContract(
+        bytes32 id_
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
+        if (id_ == bytes32(0)) revert InvalidAddress();
+        emit RemovingContract(id_);
+        contractStorage.removeContract(id_);
+    }
+
+    // // Accounting Functions
+
+    function setMomintVaultFees(
+        address vault,
+        VaultFees calldata fees
+    ) external {
+        if (vault == address(0)) revert InvalidAddress();
+        IMomintVault(vault).setVaultFees(fees);
+    }
+
+    function setFeeReceiver(address vault, address receiver) external {
+        if (vault == address(0)) revert InvalidAddress();
+        if (receiver == address(0)) revert InvalidAddress();
+        IMomintVault(vault).setFeeRecipient(receiver);
+    }
+
+    // // Module Functions
+    function addModule(
+        address vault_,
+        uint256 index_,
+        Module memory moduleData
+    ) external {
+        if (vault_ == address(0)) revert InvalidAddress();
+        if (index_ == 0) revert InvalidIndex();
+        IMomintVault(vault_).addModule(moduleData, true, index_);
+    }
+
+    function removeModule(address vault_, uint256 index_) external {
+        if (vault_ == address(0)) revert InvalidAddress();
+        if (index_ == 0) revert InvalidIndex();
+        IMomintVault(vault_).removeModule(index_);
+    }
 }
