@@ -322,10 +322,6 @@ To cancel the listing of an RWA that is currently listed, the following function
 ```
 The batch minting process mirrors the same process of purchasing from a single listing, with the main difference being that the system will handle multiple real-world assets (RWAs) the user intends to buy. All associated fees and royalties will be distributed as intended.
 
-## **Marketplace Controller Contract**
-
-
-
 ## **The Momint Vault System** 
 The momint vault system is designed to standardize the investment process for users wanting to aqurie RWA's. The system is made up of the following key components 
 
