@@ -494,3 +494,65 @@ The Vault and Module system operates on a "Parent-Child" architecture where:
 - Vault burns shares
 - Vault transfers assets to user
 
+
+The momint vault system. 
+
+The momint vault system is made up of the following key components 
+
+Vault Controller 
+Momint Vault 
+Modules 
+
+
+System Design 
+The vault controller is created to manage accounting,emergency scenrios, deploying and storing of modules, vaults and new contracts we want to add to the system. The accounting the vault manages are the fees around the vault which are the following 
+
+struct VaultFees {
+    uint64 depositFee;
+    uint64 withdrawalFee;
+    uint64 protocolFee;
+}
+
+and lastly the receiver fee which is for the protocol. 
+
+The emergency functions the controller has access it is the ability to pause and unpause a single vault or all vaults deployed. Further this contract has the ability to withdraw the liqudity in a single vault or in all vaults deployed. 
+
+The deploying of modules, vaults and contracts. The vault controller when it comes to deployment of vaults and modules works as the following. First we will deploy a contract this contract can be either a module or a vault. This will get stored inside the contract storage. The contract storage allows us to put as many vault versions and module versions we would like so we can use them for deployment. Once we have the contracts inside the contract storage we can then move to deployment of a module or a vault. Note the reason we will deploy a contract first and store it is so that we can create once and clone as many times as we like. Example of this we have currently an ERC1155 module and this module is used specifically for projects now once we deploy that and its stored we can clone it for as many projects as we want. Now moving on to deploying a new vault and adding a module. The contract storage contract will use a unique identifier when a contract is store we will use the following function with the same unique id that we used to store the contract to get the contract address and clone it. 
+
+function deployVault(bytes32 id_, bytes calldata data_) external; 
+
+We will follow this same pattern with the modules. 
+
+function deployModule(bytes32 id_, bytes calldata data_) external;
+
+Now once we have our vault and module deployed we can call the final function which is to add the module to the vault. 
+
+function addModule(address vault_, uint256 index_, bytes32 moduleId_)
+
+Note each module and vault will have their own information attached to it. What this means is that when a vault is deployed we set the name of the vault and its new vault tokens name and symbol inside of a vault struct. We can simply get this information by call the function 
+
+function getVaultInfo();
+
+The same will go for every module that is deployed all modules will follow a standard and part of that standard is that we know what the module is. The information we set for our current module we have is the following. 
+
+struct ProjectInfo {
+        uint256 id;
+        string name;
+        uint256 pricePerShare;
+        uint256 availableShares;
+        uint256 allocatedShares;
+        uint256 totalShares;
+        bool active;
+        string tokenURI;
+        address owner;
+    }
+
+We can again simply get this information by calling the following function 
+
+function getProjectInfo 
+
+Momint Vault 
+
+The momint vault itself is an erc4626 vault handling all erc20 interactions inside the system. This vault gives users the ability to deposit and underlying asset lets say USDC to receive the vault token. The vault token is the share token that is tied to the vault. The calculation behind the share token is based on the module that has been used. 
+
+
