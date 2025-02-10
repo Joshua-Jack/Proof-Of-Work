@@ -502,8 +502,6 @@ function depositLiqudity(
 This function will record how much liqudity has been added by the vault owner. 
 
 
-
-
 ## Securities and Common checks 
 
 ### Fee's Overview
@@ -529,3 +527,60 @@ Multi Fee structure managing various operational aspects.
     - Adjustable by governance
 
 
+
+
+Addressing the Core Problem
+
+Problem: Complex buyer journey and limited liquidity
+Solution: Our system implements:
+A marketplace for easy trading of RWA tokens
+Batch buying functionality for multiple assets
+Standardized pricing and trading interface
+Support for multiple payment tokens (USDT, LISK)
+
+Technical Implementation Benefits
+ERC1155 RWA Token:
+Efficiently handles multiple assets under one contract
+Supports detailed metadata for each asset
+Enables fractional ownership while preserving asset specificity
+
+Marketplace System:
+Simplifies the buying/selling process
+Provides liquidity through an organized marketplace
+Supports batch operations for efficient trading
+Implements automated royalty and fee distribution
+
+Vault System Advantages
+The Momint Vault system particularly addresses the problem by:
+Standardizing The Investment Process:
+Users can deposit assets and receive standardized vault shares
+Maintains 1:1 relationship between shares and underlying assets
+Simplifies the investment process while maintaining asset specificity
+
+Liquidity Management:
+Automated liquidity provision through the vault system
+Project owner allocations managed systematically
+Built-in mechanisms for distributing returns
+
+Modular Architecture:
+Supports different types of RWAs through modules
+Each project can have its own specific implementation
+Built for scalability
+
+Hybrid Functionality:
+Combines NFT benefits with ERC20-like trading experience
+Supports both individual asset tracking and pooled investments
+Enables complex revenue distribution through epochs
+
+Compliance:
+Maintains clear ownership records
+Supports royalty distribution
+Includes emergency controls and pause mechanisms
+
+Future-Proofing
+The system is designed for extensibility through:
+Upgradeable contracts
+Modular architecture
+Flexible fee structures
+Support for multiple payment tokens
+Ability to add new features through modules
