@@ -491,11 +491,15 @@ User deposits are properly split between liquidity reserves and project owner al
 
 
 
-Liqudity  
-Admin Distributions: Administrators can distribute returns, further bolstering the vault's liquidity.
+Liqudity Utility Functions 
+Inside the vault their are function that are used as utility this will allow vault admins to deposit into the vault incase there needs to be more liqudity added. This will be done from the following function 
 
-Vault Owner Contributions: Vault owners have the authority to inject additional liquidity as needed.
+function depositLiqudity(
+        uint256 assets_,
+        uint256 index_
+    ) external
 
+This function will record how much liqudity has been added by the vault owner. 
 
 
 
