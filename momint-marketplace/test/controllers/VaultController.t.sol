@@ -115,7 +115,7 @@ contract VaultControllerTest is Test {
         contractStorage.addContract(
             VAULT_IMPLEMENTATION_ID,
             ContractData({
-                contractAddress: vaultImplementation,
+                contractAddress: address(vaultImpl),
                 initDataRequired: true
             })
         );
@@ -147,6 +147,9 @@ contract VaultControllerTest is Test {
             controller.VAULT_CONTROLLER_ROLE(),
             address(controller)
         );
+
+        // After factory deployment
+        factory.grantRole(factory.DEPLOYER_ROLE(), address(controller));
 
         vm.stopPrank();
         console2.log("Setup complete!");
