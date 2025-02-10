@@ -322,175 +322,266 @@ To cancel the listing of an RWA that is currently listed, the following function
 ```
 The batch minting process mirrors the same process of purchasing from a single listing, with the main difference being that the system will handle multiple real-world assets (RWAs) the user intends to buy. All associated fees and royalties will be distributed as intended.
 
-## **Marketplace Controller Contract**
-## Momint Vault Documentation
+## **The Momint Vault System** 
+The momint vault system is designed to standardize the investment process for users wanting to aqurie RWA's. The system is made up of the following key components 
 
-The Momint Vault System is designed to manage real-world asset investments through a modular architecture. The system consists of several key components:
+- Vault Controlle
+- Momint Vault 
+- Modules 
 
-1. Core Vault Contract
-2. Module System
-3. Controller Framework
-4. Storage Architecture
 
-### Key Features
-- Modular investment modules
-- Multi-token support
-- Automated returns distribution
-- Liquidity management
-
-## System Architecture
-
-### 1. Core Vault (MomintVault)
-
-The vault serves as the primary entry point for user interactions and liqudity management.
-
-#### Key Components:
-
-**Asset Management**
-Assets inside the 
-```solidity
-function deposit(uint256 assets, address receiver, uint256 moduleIndex)
-external
-returns (uint256 shares)
-```
-```solidity 
-function withdraw(uint256 shares, address receiver)
-external
-returns (uint256 assets)
-```
-
-**Returns Distribution**
-
-### Overview
-The returns distribution system manages how investment returns are distributed to projects through a structured epoch-based mechanism.
-
-#### Epoch Creation
-1. When returns are received from investments the admins will have the ability to call the following function for share holders to claim :
-   - A new epoch is created with a unique ID
-   - The total return amount is recorded
-   - The system calculates per-share distribution
-
-2. **Claim Process**
-   - Users claim their portion based on share ownership of a project 
-   - System verifies:
-     - User's share ownership at epoch time
-     - No previous claims for this epoch
-     - Valid epoch ID
-
-**Liquidity Control System**
-
-### Overview
-The liquidity control system ensures the vault maintains sufficient liquidity for withdrawals while maximizing efficiency.
-
-#### Liquidity Ratios
-- **Minimum Liquidity Hold (minLiquidityHoldBP)**
-  - Percentage of deposits kept as liquid reserves
-  - Default: 30% (3000 basis points)
-  - Adjustable by governance 
-
-- **Maximum Owner Share (maxOwnerShareBP)**
-  - Maximum allocation to project owners
-  - Default: 70% (7000 basis points)
-  - Adjustable by governance
-
-**Fee Management System**
-
-### Overview
-Multi Fee structure managing various operational aspects.
+**Vault Controller**
+The vault controller is created to manage accounting,emergency scenrios, deploying and storing of modules, vaults and new contracts we want to add to the system. Part of the accounting the vault manages is the multi fee structure managing various operational aspects
 
 ### Fee Types
 
-1. **Deposit Fee**
-   - Charged on deposit
-   - Default: 5% (500 basis points)
-   - Calculation: `depositAmount * (depositFee / 10000)`
-   - - Adjustable by governance
+ **Deposit Fee**
+    - Charged on deposit
+    - Default: 5% (500 basis points)
+    - Calculation: `depositAmount * (depositFee / 10000)`
+    - Adjustable by governance
+ **Withdrawal Fee**
+    - Charged on withdrawal
+    - Default: 1% (100 basis points)
+    - Calculation: `withdrawAmount * (withdrawalFee / 10000)`
+    - Adjustable by governance
+ **Protocol Fee**
+    - Platform operation fee
+    - Default: 3% (300 basis points)
+    - Applied to returns
+    - Adjustable by governance
 
-2. **Withdrawal Fee**
-   - Charged on withdrawal
-   - Default: 1% (100 basis points)
-   - Calculation: `withdrawAmount * (withdrawalFee / 10000)`
-   - - Adjustable by governance
+The emergency functions the controller has access it is the ability to pause and unpause a single vault or all vaults deployed. Further this contract has the ability to withdraw the liqudity in a single vault or in all vaults deployed. 
 
-3. **Protocol Fee**
-   - Platform operation fee
-   - Default: 3% (300 basis points)
-   - Applied to returns
-   - - Adjustable by governance
+The deploying of modules, vaults and contracts. The vault controller when it comes to deployment of vaults and modules works as the following. First we will deploy a contract this contract can be either a module or a vault. This will get stored inside the contract storage. The contract storage allows us to put as many vault versions and module versions we would like so we can use them for deployment. Once we have the contracts inside the contract storage we can then move to deployment of a module or a vault. Note the reason we will deploy a contract first and store it is so that we can create once and clone as many times as we like. Example of this we have currently an ERC1155 module and this module is used specifically for projects now once we deploy that and its stored we can clone it for as many projects as we want. Now moving on to deploying a new vault and adding a module. The contract storage contract will use a unique identifier when a contract is store we will use the following function with the same unique id that we used to store the contract to get the contract address and clone it. 
+
+```solidity
+function deployVault(bytes32 id_, bytes calldata data_) external; 
+```
+
+We will follow this same pattern with the modules. 
+
+```soldity
+function deployModule(bytes32 id_, bytes calldata data_) external;
+```
+
+Now once we have our vault and module deployed we can call the final function which is to add the module to the vault. 
+
+```solidity
+function addModule(address vault_, uint256 index_, bytes32 moduleId_)
+```
+
+Note each module and vault will have their own information attached to it. What this means is that when a vault is deployed we set the name of the vault and its new vault tokens name and symbol inside of a vault struct. We can simply get this information by call the function 
+
+```solidity 
+function getVaultInfo();
+```
+
+The same will go for every module that is deployed all modules will follow a standard and part of that standard is that we know what the module is. The information we set for our current module we have is the following. 
+
+```solidity
+struct ProjectInfo {
+        uint256 id;
+        string name;
+        uint256 pricePerShare;
+        uint256 availableShares;
+        uint256 allocatedShares;
+        uint256 totalShares;
+        bool active;
+        string tokenURI;
+        address owner;
+    }
+```
+
+We can again simply get this information by calling the following function 
+
+```solidity
+function getProjectInfo 
+```
+
+**Momint Vault**
+The momint vault is an erc4626 vault designed to handle erc20 managment for users and project owners. This vault gives users the following abilities: 
+
+- Deposit
+   The users can deposit the underlying token inside the vault and will recive the vault token which are shares based on the module that was used.
+- Withdraw 
+  The users can sell back there vault token(share token) back to the vault to recive back their underlying asset they origanlly deposited 
+- Redeem 
+  The users will have the ability to claim their part of the revenue generated by projects 
+
+The vault will give the project owners the following abilities: 
+
+- DistributeReturns - 
+  The project owners will have the ability to deposit into the vault the ROI from the projects.
+
+- ClaimOwnerAllocation -
+  The project owners will have the ability to get their share of the liqudity inside the vault meaning what they have sold. 
 
 
-### 2. Module System
+Now that we understand the main features we can dive into the main flows of the momint vault and how it connects with the modules. The main flows we have are the following 
 
-Modules are pluggable components that implement specific recipes.
+- Deposit 
+- Withdraw 
+- Distribute and Claim 
+- Project Owner Allocation 
 
-## **Core Relationship**
+**Deposit** 
+When a user deposits inside of the momint vault they will use the following function 
 
-The Vault and Module system operates on a "Parent-Child" architecture where:
+```solidity 
+function deposit(
+        uint256 assets_,
+        uint256 index_
+    ) external
+```
 
-### **Vault (Parent)**
+This function takes the assets and a specific project index. This means that when index 1 is passed all calculations will be handled on that project. The deposit function will first go and calculate all the fee's and automatically send them to where they should be distrubuted to. After this the function will grab a the contract address at the index that was passed. This contract that the function is grabbing is a module address which again is a project. We will call the invest function inside of the module note this is also part of the module standard. The invest function will go to the module and the module itself will have its own calculations on how an investment works and how many shares should be giving to the user and if there needs to be any assets refunded. After the module sends back the calulation of share amounts we then will mint that amount back to the user. Note inside the system we follow a 1:1 approach meaning you need to buy at whole. There will not be 0.5 share it has to be 1 share minimum.
 
-- Acts as the primary entry point for all user interactions
-- Holds and manages all actual assets (e.g., USDT)
-- Controls access to funds
-- Maintains the source of truth for total shares and assets
-- Coordinates all module activities
 
-### **Modules (Child)**
+**Withdraw**
+When a user wants to get their underlying assets back they will use the following function 
 
-- Handle investment state tracking
-- Calculate share allocations
-- Track user positions
-- Never directly handle assets
-- Operate as "bookkeepers" for specific recipes(Projects)
+```solidity
+ function withdraw(
+        uint256 shares,
+        uint256 index_
+    ) external
+```
 
-## **Key Interaction Flows**
+This function takes the shares they want to burn and the specific project index. This function will follow the same method of grabing the address from the index as per the deposit function. The withdraw function will check all common check exmaple balance of the user to ensure they have shares. Now we will be calling the divest function inside of the module and again this is also part of the module standard. The divest function will go to the module and the module itself will handle all divestments calculations so when we get the amount back we can perform the proper calculations inside the vault. We will be checking to ensure we have enough liqudity inside the vault to ensure we can make the withdraw if there is no liqudity the user will have to come back when liqudity is available. After we made this check we move onto burning of the shares and transfering the underlying assets back to the user. 
 
-### **1. Investment Process**
-- **User Entry**
-- User interacts only with the vault
-- Sends assets to vault
-- Specifies which module (Project) to use
+**Shares Explination**
+In the system, each project is allocated a specific number of shares on creation of their project. For example, if a project is assigned 100 shares, only those 100 share tokens can be sold. When a user invests in that project, they can acquire up to the available 100 shares. This structure renders the total number of shares in the vault irrelevant because, although the vault may contain 300 minted shares, these shares must originate from a project. Therefore, a user can only obtain shares after a project's allocation has been determined.
 
-- **Vault Processing**
-- Receives and holds assets
-- Calculates and deducts fees
-- Requests share calculation from module
 
-- **Module Role**
-- Calculates appropriate share allocation
-- Updates internal state to track investment
-- Returns share calculation to vault
+**Distribute and Claim**
+The distribution system manages how investment returns are distributed to projects through a structured epoch-based mechanism. When an project owner wants to distrubute returns to their share holders they will use the following function 
+
+```solidity
+function distributeReturns(
+        uint256 amount,
+        uint256 index_
+    ) external
+```
+
+This function will first go to the project and get the needed accounting functions. These function will be utilized inside the vault to calculate the distrubution and ensure we follow the 1:1 buy at whole. After this we will create a returns epoch. The epochs are created to ensure fair distribution of returns based on when users held shares, tracks and manage distributions in a organized way, represents a distinct period of returns/revenue distribution. Once the epoch is created users are able to claim on the epoch. The users will use the following function to claim their returns. 
+
+```solidity
+ function claimReturns(
+        uint256 index_,
+        uint256 epochId_
+    ) external
+```
+
+This function will take the epoch id in which the user wants to claim from and the project in which the epoch belongs to. From here the function will check to ensure that the user hasnt already claimed from this epoch, holds shares inside the project and ensures it follows our dust controll. Once the checks pass the user will receive the underlying asset in the vault as their reward. 
+
+**Project Owner Allocation** 
+The vault is designed to autonomously manage its liquidity through multiple channels. One of these channels are deposits. When users deposit funds, these assets increase the vault's liquidity. Now when the vault gets this liqudity it will be partitioned. X percent to the vaults liqudity and X percent allocated to the project owner. Now project owners can claim their sales from the following function. 
+
+```solidity
+ function claimOwnerAllocation()
+```
+
+This function performs several checks and calculations:
   
-- **Completion**
-- Vault mints shares to user
-- Assets remain in vault
-- Module maintains record of position
+  1. Allocation Check:
+    - Confirms if the caller has any unclaimed allocation.
+    - Ensures the total allocated amount is greater than what has already been released.
 
- ### **Returns Distribution**
+  2. Release Calculation:
+    - Calculates the time elapsed since the last release.
+    - Calculates the release amount based on:
+    - Total allocated amount
+    - Time elapsed
+    - Release period
+    - Number of release portions
 
-- **Initial Return Receipt**
-- Returns are sent to vault
-- Vault creates new distribution epoch for module(Project)
-  
-- **Claim Process**
-- Users request claims through vault
-- Vault checks with module for share verification
-- Module confirms user's position
-- Vault handles actual distribution of returns
+   3. Amount Validation:
+    - Caps the release to the remaining unclaimed balance.
+    - Ensures the vault has enough liquidity to process the claim.
 
-### **Withdrawal Process**
+**Key Points About Vesting:**
 
-- **User Request**
-- User requests withdrawal from vault
-- Specifies share amount to withdraw
-  
-- **Validation**
-- Vault checks with module for position verification
-- Module confirms user's share ownership
-- Vault verifies sufficient liquidity
-  
-- **Execution**
-- Module updates state to reflect withdrawal
-- Vault burns shares
-- Vault transfers assets to user
+- Vesting follows a linear release over the RELEASE_PERIOD.
+- The total allocation is split into RELEASE_PORTIONS.
+- Each claim calculates the amount that can be released based on elapsed time.
+- A project owner cannot claim more than the available liquidity in the vault.
+- Keeps track of released amounts to prevent double claims.
 
+**Why This Matters**
+This system balances liquidity and ownership distribution:
+
+- Project owners receive their share progressively over time.
+- The vault ensures there’s always enough liquidity for withdrawals.
+- User deposits are properly split between liquidity reserves and project owner allocations.
+
+
+
+**Liqudity Utility Functions**
+Inside the vault their are function that are used as utility this will allow vault admins to deposit into the vault incase there needs to be more liqudity added. This will be done from the following function 
+
+```solidity
+function depositLiqudity(
+        uint256 assets_,
+        uint256 index_
+    ) external
+```
+
+This function will record how much liqudity has been added by the vault owner. 
+
+
+##**Addressing the Core Problem**
+
+  1. Problem: Complex buyer journey and limited liquidity
+  2. Solution: Our system implements:
+A marketplace for easy trading of RWA tokens
+Batch buying functionality for multiple assets
+Standardized pricing and trading interface
+Support for multiple payment tokens (USDT, LISK)
+
+**Technical Implementation Benefits**
+ERC1155 RWA Token:
+Efficiently handles multiple assets under one contract
+Supports detailed metadata for each asset
+Enables fractional ownership while preserving asset specificity
+
+**Marketplace System:**
+Simplifies the buying/selling process
+Provides liquidity through an organized marketplace
+Supports batch operations for efficient trading
+Implements automated royalty and fee distribution
+
+**Vault System Advantages**
+The Momint Vault system particularly addresses the problem by:
+Standardizing The Investment Process:
+Users can deposit assets and receive standardized vault shares
+Maintains 1:1 relationship between shares and underlying assets
+Simplifies the investment process while maintaining asset specificity
+
+**Liquidity Management:**
+Automated liquidity provision through the vault system
+Project owner allocations managed systematically
+Built-in mechanisms for distributing returns
+
+**Modular Architecture:**
+Supports different types of RWAs through modules
+Each project can have its own specific implementation
+Built for scalability
+
+**Hybrid Functionality:**
+Combines NFT benefits with ERC20-like trading experience
+Supports both individual asset tracking and pooled investments
+Enables complex revenue distribution through epochs
+
+**Compliance:**
+Maintains clear ownership records
+Supports royalty distribution
+Includes emergency controls and pause mechanisms
+
+**Future-Proofing**
+The system is designed for extensibility through:
+Upgradeable contracts
+Modular architecture
+Flexible fee structures
+Support for multiple payment tokens
+Ability to add new features through modules
