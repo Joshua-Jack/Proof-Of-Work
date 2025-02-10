@@ -408,6 +408,7 @@ Now that we understand the main features we can dive into the main flows of the 
 Deposit 
 Withdraw 
 Distribute and Claim 
+Liqudity Allocation 
 
 Deposit 
 When a user deposits inside of the momint vault they will use the following function 
@@ -430,14 +431,53 @@ When a user wants to get their underlying assets back they will use the followin
 
 This function takes the shares they want to burn and the specific project index. This function will follow the same method of grabing the address from the index as per the deposit function. The withdraw function will check all common check exmaple balance of the user to ensure they have shares. Now we will be calling the divest function inside of the module and again this is also part of the module standard. The divest function will go to the module and the module itself will handle all divestments calculations so when we get the amount back we can perform the proper calculations inside the vault. We will be checking to ensure we have enough liqudity inside the vault to ensure we can make the withdraw if there is no liqudity the user will have to come back when liqudity is available. After we made this check we move onto burning of the shares and transfering the underlying assets back to the user. 
 
-Share Explination 
-In our system, each project is allocated a specific number of shares on creation of their project. For example, if a project is assigned 100 shares, only those 100 share tokens can be sold. When a user invests in that project, they can acquire up to the available 100 shares. This structure renders the total number of shares in the vault irrelevant because, although the vault may contain 300 minted shares, these shares must originate from a project. Therefore, a user can only obtain shares after a project's allocation has been determined.
+Shares Explination 
+In the system, each project is allocated a specific number of shares on creation of their project. For example, if a project is assigned 100 shares, only those 100 share tokens can be sold. When a user invests in that project, they can acquire up to the available 100 shares. This structure renders the total number of shares in the vault irrelevant because, although the vault may contain 300 minted shares, these shares must originate from a project. Therefore, a user can only obtain shares after a project's allocation has been determined.
 
 
 Distribute and Claim 
-The distribution system manages how investment returns are distributed to projects through a structured epoch-based mechanism.
+The distribution system manages how investment returns are distributed to projects through a structured epoch-based mechanism. When an project owner wants to distrubute returns to their share holders they will use the following function 
+
+function distributeReturns(
+        uint256 amount,
+        uint256 index_
+    ) external
+
+This function will first go to the project and get the needed accounting functions. These function will be utilized inside the vault to calculate the distrubution and ensure we follow the 1:1 buy at whole. After this we will create a returns epoch. The epochs are created to ensure fair distribution of returns based on when users held shares, tracks and manage distributions in a organized way, represents a distinct period of returns/revenue distribution. Once the epoch is created users are able to claim on the epoch. The users will use the following function to claim their returns. 
+
+ function claimReturns(
+        uint256 index_,
+        uint256 epochId_
+    ) external
+
+This function will take the epoch id in which the user wants to claim from and the project in which the epoch belongs to. From here the function will check to ensure that the user hasnt already claimed from this epoch, holds shares inside the project and ensures it follows our dust controll. Once the checks pass the user will receive the underlying asset in the vault as their reward. 
 
 
 
+
+
+## Securities and Common checks 
+
+### Fee's Overview
+
+Multi Fee structure managing various operational aspects.
+
+### Fee Types
+
+ **Deposit Fee**
+    - Charged on deposit
+    - Default: 5% (500 basis points)
+    - Calculation: `depositAmount * (depositFee / 10000)`
+    - Adjustable by governance
+ **Withdrawal Fee**
+    - Charged on withdrawal
+    - Default: 1% (100 basis points)
+    - Calculation: `withdrawAmount * (withdrawalFee / 10000)`
+    - Adjustable by governance
+ **Protocol Fee**
+    - Platform operation fee
+    - Default: 3% (300 basis points)
+    - Applied to returns
+    - Adjustable by governance
 
 
