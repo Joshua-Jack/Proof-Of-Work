@@ -408,7 +408,7 @@ Now that we understand the main features we can dive into the main flows of the 
 Deposit 
 Withdraw 
 Distribute and Claim 
-Liqudity Allocation 
+Project Owner Allocation 
 
 Deposit 
 When a user deposits inside of the momint vault they will use the following function 
@@ -451,6 +451,50 @@ This function will first go to the project and get the needed accounting functio
     ) external
 
 This function will take the epoch id in which the user wants to claim from and the project in which the epoch belongs to. From here the function will check to ensure that the user hasnt already claimed from this epoch, holds shares inside the project and ensures it follows our dust controll. Once the checks pass the user will receive the underlying asset in the vault as their reward. 
+
+Project Owner Allocation 
+The vault is designed to autonomously manage its liquidity through multiple channels. One of these channels are deposits. When users deposit funds, these assets increase the vault's liquidity. Now when the vault gets this liqudity it will be partitioned. X percent to the vaults liqudity and X percent allocated to the project owner. Now project owners can claim their sales from the following function. 
+
+ function claimOwnerAllocation()
+
+This function performs several checks and calculations:
+
+Allocation Check:
+Confirms if the caller has any unclaimed allocation.
+Ensures the total allocated amount is greater than what has already been released.
+
+Release Calculation:
+Calculates the time elapsed since the last release.
+Calculates the release amount based on:
+Total allocated amount
+Time elapsed
+Release period
+Number of release portions
+
+Amount Validation:
+Caps the release to the remaining unclaimed balance.
+Ensures the vault has enough liquidity to process the claim.
+
+Key Points About Vesting:
+Vesting follows a linear release over the RELEASE_PERIOD.
+The total allocation is split into RELEASE_PORTIONS.
+Each claim calculates the amount that can be released based on elapsed time.
+A project owner cannot claim more than the available liquidity in the vault.
+Keeps track of released amounts to prevent double claims.
+
+Why This Matters
+This system balances liquidity and ownership distribution:
+
+Project owners receive their share progressively over time.
+The vault ensures there’s always enough liquidity for withdrawals.
+User deposits are properly split between liquidity reserves and project owner allocations.
+
+
+
+Liqudity  
+Admin Distributions: Administrators can distribute returns, further bolstering the vault's liquidity.
+
+Vault Owner Contributions: Vault owners have the authority to inject additional liquidity as needed.
 
 
 
