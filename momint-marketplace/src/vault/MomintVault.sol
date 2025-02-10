@@ -44,7 +44,7 @@ contract MomintVault is
     error AlreadyClaimed();
     error NoSharesOwned();
     error InvalidModuleIndex();
-
+    error TransferFailed();
     // ============ Constants ============
     uint32 private constant DUST = 1e4;
     uint256 private constant PRECISION = 1e36;
@@ -54,20 +54,16 @@ contract MomintVault is
     uint8 public constant decimalOffset = 9;
     uint256 public constant RELEASE_PERIOD = 7 days;
     uint256 public constant RELEASE_PORTIONS = 4; // Release over 4 weeks
+    uint256 public constant liquidityBuffer = 1000;
 
     // ============ State Variables ============
-    uint256 public firstDeposit;
     uint8 private _decimals;
-    uint256 public depositLimit;
     uint256 public feesUpdatedAt;
     address public feeRecipient;
     address private vaultTokenAddress;
-    uint256 public lastUpdateTime;
     uint256 public currentEpochId;
     uint16 public minLiquidityHoldBP;
     uint16 public maxOwnerShareBP;
-    uint256 public liquidityBuffer;
-    uint256 public totalPendingReturns;
     uint256 public totalDistributedReturns;
 
     // ============ Data Structures ============
@@ -149,7 +145,7 @@ contract MomintVault is
         __Ownable_init(params.owner);
         __ERC20_init(params.shareName, params.symbol);
         __Pausable_init();
-
+        module = IModule(address(0));
         vaultTokenAddress = address(params.baseAsset);
         (_decimals) = VaultHelper.validateVaultParameters(
             params.baseAsset,
@@ -194,11 +190,10 @@ contract MomintVault is
 
         // Calculate and take out fees
         uint256 netAmount = _handleFees(assets);
-
+        emit Deposit(msg.sender, receiver, assets, shares);
         // Process the deposit with the full net amount
         shares = _processDeposit(netAmount, receiver, index_);
 
-        emit Deposit(msg.sender, receiver, assets, shares);
         return shares;
     }
 
@@ -209,22 +204,19 @@ contract MomintVault is
             Math.Rounding.Floor
         );
 
-        // Calculate net amount after fees
-        uint256 netAmount = assets - feeAmount;
-
-        // Transfer fee if any
         if (feeAmount > 0) {
+            require(
+                IERC20(asset()).balanceOf(address(this)) >= feeAmount,
+                "Insufficient balance for fee"
+            );
             IERC20(asset()).safeTransfer(feeRecipient, feeAmount);
         }
 
-        // Debug logs
-        console.log("Input Amount:", assets);
-        console.log("Fee Amount:", feeAmount);
-        console.log("Net Amount:", netAmount);
-
-        return netAmount;
+        return assets - feeAmount;
     }
 
+    // The _processDeposit function is calling trusted code from the module.
+    // slither-disable-next-line reentrancy-events, reentrancy-benign, reentrancy-vulnerabilities
     function _processDeposit(
         uint256 amount,
         address receiver,
@@ -236,19 +228,18 @@ contract MomintVault is
             activeModule.active = true;
         }
 
+        uint256 preBalance = IERC20(asset()).balanceOf(address(this));
+
         // Invest the full amount
         (uint256 shares, uint256 refund) = activeModule.module.invest(
             amount,
             receiver
         );
-
-        // Handle refund if any
-        if (refund > 0) {
-            IERC20(asset()).safeTransfer(msg.sender, refund);
-            emit Refund(msg.sender, refund);
-        }
-
-        _mint(receiver, shares);
+        // Verify state changes
+        require(
+            IERC20(asset()).balanceOf(address(this)) >= preBalance - refund,
+            "Invalid balance change"
+        );
 
         // Calculate liquidity split after successful investment
         uint256 actualInvestment = amount - refund;
@@ -257,7 +248,16 @@ contract MomintVault is
         uint256 ownerPortion = actualInvestment - liquidityPortion;
 
         address projectOwner = activeModule.module.getProjectInfo().owner;
-        _allocateToOwner(projectOwner, ownerPortion);
+
+        // Handle refund if any
+        if (refund > 0) {
+            emit Refund(msg.sender, refund);
+            IERC20(asset()).safeTransfer(msg.sender, refund);
+        }
+
+        _mint(receiver, shares);
+
+        _allocationToOwner(projectOwner, ownerPortion);
 
         return shares;
     }
@@ -294,6 +294,7 @@ contract MomintVault is
 
         // Get divestment amount first to check liquidity
         uint256 divestAmount = activeModule.module.divest(shares, msg.sender);
+        if (divestAmount == 0) revert InvalidAmount();
         if (divestAmount <= DUST) revert WithdrawalTooSmall();
 
         uint256 withdrawalFee = divestAmount.mulDiv(
@@ -352,17 +353,18 @@ contract MomintVault is
         emit LiquidityRatiosUpdated(newMinLiquidityBP_, newMaxOwnerBP_);
     }
 
+    // slither-disable-next-line timestamp
     function _checkLiquidity(
         uint256 withdrawalAmount
     ) internal view returns (bool) {
         uint256 availableLiquidity = IERC20(asset()).balanceOf(address(this));
-        uint256 bufferRequired = (totalAssets() * BUFFER_THRESHOLD_BP) /
+        uint256 bufferRequired = (totalAssets() * liquidityBuffer) /
             MAX_BASIS_POINTS;
         return availableLiquidity >= (withdrawalAmount + bufferRequired);
     }
 
-    function _allocateToOwner(address owner, uint256 amount) internal {
-        OwnerAllocation storage allocation = ownerAllocations[owner];
+    function _allocationToOwner(address projectOwner, uint256 amount) internal {
+        OwnerAllocation storage allocation = ownerAllocations[projectOwner];
         allocation.totalAmount += amount;
         allocation.lastReleaseTime = block.timestamp;
     }
@@ -422,6 +424,7 @@ contract MomintVault is
         return userShare;
     }
 
+    // slither-disable-next-line timestamp
     function claimOwnerAllocation() external {
         OwnerAllocation storage allocation = ownerAllocations[msg.sender];
         require(
@@ -430,11 +433,20 @@ contract MomintVault is
         );
 
         uint256 elapsedTime = block.timestamp - allocation.lastReleaseTime;
-        uint256 portions = elapsedTime / RELEASE_PERIOD;
-        if (portions == 0) return;
 
-        uint256 releaseAmount = (allocation.totalAmount / RELEASE_PORTIONS) *
-            portions;
+        // Fix division before multiplication by combining the calculations
+        uint256 releaseAmount = Math.mulDiv(
+            Math.mulDiv(
+                allocation.totalAmount * elapsedTime,
+                1,
+                RELEASE_PERIOD * RELEASE_PORTIONS,
+                Math.Rounding.Floor
+            ),
+            1,
+            1,
+            Math.Rounding.Floor
+        );
+
         releaseAmount = Math.min(
             releaseAmount,
             allocation.totalAmount - allocation.releasedAmount

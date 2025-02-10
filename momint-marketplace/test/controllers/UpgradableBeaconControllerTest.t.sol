@@ -77,8 +77,11 @@ contract UpgradableBeaconControllerTest is Test {
     }
 
     function test_DeployMarketplaceProxy() public {
+        address beaconAddress = beaconController.beacons(MARKETPLACE_BEACON);
+        require(beaconAddress != address(0), "Beacon address cannot be zero");
+
         BeaconProxy proxy = new BeaconProxy(
-            beaconController.beacons(MARKETPLACE_BEACON),
+            beaconAddress,
             abi.encodeWithSelector(
                 Marketplace.initialize.selector,
                 proxyToken,

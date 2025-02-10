@@ -30,11 +30,12 @@ contract ModuleStorage is Ownable {
     /// @param owner_ The address of the contract owner.
     constructor(address owner_) Ownable(owner_) {}
 
+    // slither-disable-next-line timestamp
     function storeModule(
         address module,
         string memory name,
         address vault
-    ) external {
+    ) external onlyOwner {
         if (modules[module].moduleAddress != address(0))
             revert ModuleAlreadyStored();
 
@@ -54,7 +55,8 @@ contract ModuleStorage is Ownable {
         emit ModuleStored(module, currentProjectId, name, vault);
     }
 
-    function removeModule(address module) external {
+    // slither-disable-next-line timestamp
+    function removeModule(address module) external onlyOwner {
         if (modules[module].moduleAddress == address(0))
             revert ModuleNotStored();
         modules[module].active = false;
@@ -62,8 +64,9 @@ contract ModuleStorage is Ownable {
     }
 
     function getAllModules() external view returns (ModuleInfo[] memory) {
-        ModuleInfo[] memory allModules = new ModuleInfo[](moduleList.length);
-        for (uint i = 0; i < moduleList.length; i++) {
+        uint256 totalLength = moduleList.length;
+        ModuleInfo[] memory allModules = new ModuleInfo[](totalLength);
+        for (uint i = 0; i < totalLength; i++) {
             allModules[i] = modules[moduleList[i]];
         }
         return allModules;

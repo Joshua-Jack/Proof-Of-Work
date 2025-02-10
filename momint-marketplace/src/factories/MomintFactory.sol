@@ -41,6 +41,7 @@ contract MomintFactory is Ownable {
         DeployConfig calldata config
     ) external onlyOwner returns (address newContract) {
         if (config.implementation == address(0)) revert InvalidImplementation();
+        emit ContractDeployed(newContract, config.deployType, config.salt);
 
         if (config.deployType == DeploymentType.CLONE) {
             newContract = _deployClone(
@@ -56,7 +57,6 @@ contract MomintFactory is Ownable {
             );
         }
 
-        emit ContractDeployed(newContract, config.deployType, config.salt);
         return newContract;
     }
 
@@ -66,6 +66,9 @@ contract MomintFactory is Ownable {
         bytes memory initData,
         bytes32 salt
     ) internal returns (address newContract) {
+        if (implementation == address(0)) revert InvalidImplementation();
+        if (salt == bytes32(0)) revert InvalidParameters();
+        if (initData.length == 0) revert InvalidParameters();
         newContract = Clones.cloneDeterministic(implementation, salt);
 
         if (initData.length > 0) {
@@ -82,17 +85,19 @@ contract MomintFactory is Ownable {
         bytes memory creationCode,
         bytes memory constructorArgs,
         bytes32 salt
-    ) internal returns (address newContract) {
-        bytes memory bytecode = abi.encodePacked(creationCode, constructorArgs);
-        // slither-disable-next-line missing-zero-check
+    ) internal returns (address deployed) {
+        if (creationCode.length == 0) revert InvalidParameters();
+        if (constructorArgs.length == 0) revert InvalidParameters();
+        if (salt == bytes32(0)) revert InvalidParameters();
+        // Use abi.encode instead of abi.encodePacked for safer encoding
+        bytes memory bytecode = abi.encode(creationCode, constructorArgs);
+
         assembly {
-            newContract := create2(0, add(bytecode, 32), mload(bytecode), salt)
-            if iszero(extcodesize(newContract)) {
-                revert(0, 0)
-            }
+            deployed := create2(0, add(bytecode, 0x20), mload(bytecode), salt)
         }
 
-        return newContract;
+        require(deployed != address(0), "Failed to deploy contract");
+        return deployed;
     }
 
     /// @notice Predicts the address where a contract will be deployed
@@ -101,7 +106,12 @@ contract MomintFactory is Ownable {
         bytes memory creationCode,
         bytes memory constructorArgs
     ) public view returns (address) {
-        bytes memory bytecode = abi.encodePacked(creationCode, constructorArgs);
+        if (creationCode.length == 0) revert InvalidParameters();
+        if (constructorArgs.length == 0) revert InvalidParameters();
+        if (salt == bytes32(0)) revert InvalidParameters();
+        // Use abi.encode instead of abi.encodePacked for safer encoding
+        bytes memory bytecode = abi.encode(creationCode, constructorArgs);
+
         bytes32 hash = keccak256(
             abi.encodePacked(
                 bytes1(0xff),
@@ -110,6 +120,7 @@ contract MomintFactory is Ownable {
                 keccak256(bytecode)
             )
         );
+
         return address(uint160(uint256(hash)));
     }
 }

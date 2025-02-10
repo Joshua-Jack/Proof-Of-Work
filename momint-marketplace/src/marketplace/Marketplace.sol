@@ -4,10 +4,13 @@ pragma solidity 0.8.24;
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "../assets/ERC1155RWA.sol";
+import "../interfaces/IMarketplace.sol";
+import "forge-std/console.sol";
 
 /**
  * @title RWA Marketplace
@@ -18,15 +21,18 @@ contract Marketplace is
     OwnableUpgradeable,
     ReentrancyGuardUpgradeable,
     ERC1155Holder,
-    PausableUpgradeable
+    PausableUpgradeable,
+    IMarketplace
 {
+    using SafeERC20 for IERC20;
+
     // State variables
     ERC1155RWA public rwaToken;
     mapping(address => bool) public acceptedTokens;
     uint256 public protocolFee;
     address public feeRecipient;
-    bool public emergencyStop;
     uint256 private _nextListingId;
+    uint256 constant MAX_ARRAY_LENGTH = 10;
 
     struct Listing {
         address seller;
@@ -63,9 +69,14 @@ contract Marketplace is
         uint256 amount
     );
     event ProtocolFeePaid(uint256 indexed listingId, uint256 amount);
-    event EmergencyToggled(bool stopped);
     event TokenAcceptanceUpdated(address indexed token, bool accepted);
-
+    event MarketplaceInitialized(
+        address indexed rwaToken,
+        address indexed feeRecipient,
+        uint256 protocolFee
+    );
+    event ProtocolFeeUpdated(uint256 protocolFee);
+    event FeeRecipientUpdated(address feeRecipient);
     // Custom errors
     error InsufficientPayment(uint256 expected, uint256 received);
     error InvalidRoyaltyAmount(uint256 amount);
@@ -73,9 +84,13 @@ contract Marketplace is
     error EmergencyStopActive();
     error InvalidToken();
     error InvalidAmount();
+    error ArrayLengthMismatch();
+    error ArrayLengthTooLong();
+    error InvalidArrayLength();
     error NotSeller();
     error ListingNotActive();
     error FeeTooHigh();
+    error InvalidListingId();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -99,28 +114,26 @@ contract Marketplace is
         feeRecipient = _feeRecipient;
         protocolFee = _protocolFee;
         _nextListingId = 1;
+        emit MarketplaceInitialized(_rwaToken, _feeRecipient, _protocolFee);
     }
 
     // Admin functions
     function setProtocolFee(uint256 _fee) external onlyOwner {
         if (_fee > 1000) revert FeeTooHigh();
         protocolFee = _fee;
+        emit ProtocolFeeUpdated(_fee);
     }
 
     function setFeeRecipient(address _feeRecipient) external onlyOwner {
         if (_feeRecipient == address(0)) revert InvalidToken();
         feeRecipient = _feeRecipient;
+        emit FeeRecipientUpdated(_feeRecipient);
     }
 
     function setAcceptedToken(address token, bool accepted) external onlyOwner {
         if (token == address(0)) revert InvalidToken();
         acceptedTokens[token] = accepted;
         emit TokenAcceptanceUpdated(token, accepted);
-    }
-
-    function toggleEmergencyStop() external onlyOwner {
-        emergencyStop = !emergencyStop;
-        emit EmergencyToggled(emergencyStop);
     }
 
     // Main marketplace functions
@@ -130,7 +143,6 @@ contract Marketplace is
         uint256 pricePerToken,
         address paymentToken
     ) external whenNotPaused nonReentrant returns (uint256) {
-        if (emergencyStop) revert EmergencyStopActive();
         if (amount == 0) revert InvalidAmount();
         if (pricePerToken == 0) revert InvalidAmount();
         if (!acceptedTokens[paymentToken]) revert InvalidToken();
@@ -176,8 +188,6 @@ contract Marketplace is
     function cancelListing(
         uint256 listingId
     ) external whenNotPaused nonReentrant {
-        if (emergencyStop) revert EmergencyStopActive();
-
         Listing storage listing = listings[listingId];
         if (!listing.active) revert ListingNotActive();
         if (listing.seller != msg.sender) revert NotSeller();
@@ -200,11 +210,15 @@ contract Marketplace is
         uint256 listingId,
         uint256 amount
     ) external nonReentrant whenNotPaused {
-        if (emergencyStop) revert EmergencyStopActive();
-
         Listing storage listing = listings[listingId];
         if (!listing.active) revert ListingNotActive();
         if (amount > listing.amount) revert InvalidAmount();
+
+        // Update listing
+        listing.amount -= amount;
+        if (listing.amount == 0) {
+            listing.active = false;
+        }
 
         uint256 totalPrice = _handlePayment(listingId, amount, msg.sender);
 
@@ -216,12 +230,6 @@ contract Marketplace is
             amount,
             ""
         );
-
-        // Update listing
-        listing.amount -= amount;
-        if (listing.amount == 0) {
-            listing.active = false;
-        }
 
         emit ListingSold(
             listingId,
@@ -236,15 +244,19 @@ contract Marketplace is
         uint256[] calldata listingIds,
         uint256[] calldata amounts
     ) external nonReentrant whenNotPaused {
-        if (emergencyStop) revert EmergencyStopActive();
-        if (listingIds.length != amounts.length) revert InvalidAmount();
+        if (listingIds.length == 0) revert InvalidArrayLength();
+        if (listingIds.length != amounts.length) revert ArrayLengthMismatch();
+        if (listingIds.length > MAX_ARRAY_LENGTH) revert ArrayLengthTooLong();
 
         for (uint256 i = 0; i < listingIds.length; i++) {
             _processPurchase(listingIds[i], amounts[i]);
+            console.log("Listing ID:", listingIds[i]);
+            console.log("Amount:", amounts[i]);
         }
     }
 
     // Internal functions
+    // slither-disable-next-line calls-loop
     function _handlePayment(
         uint256 listingId,
         uint256 amount,
@@ -266,13 +278,11 @@ contract Marketplace is
 
         // Transfer protocol fee
         if (protocolFeeAmount > 0) {
-            bool feeTransferred = paymentToken.transferFrom(
+            paymentToken.safeTransferFrom(
                 buyer,
                 feeRecipient,
                 protocolFeeAmount
             );
-            if (!feeTransferred) revert TransferFailed();
-
             remainingAmount -= protocolFeeAmount;
             emit ProtocolFeePaid(listingId, protocolFeeAmount);
         }
@@ -281,13 +291,11 @@ contract Marketplace is
         uint256 totalRoyalties = 0;
         for (uint256 i = 0; i < recipients.length; i++) {
             if (royalties[i] > 0) {
-                bool royaltyTransferred = paymentToken.transferFrom(
+                paymentToken.safeTransferFrom(
                     buyer,
                     recipients[i],
                     royalties[i]
                 );
-                if (!royaltyTransferred) revert TransferFailed();
-
                 totalRoyalties += royalties[i];
                 emit RoyaltyPaid(listing.tokenId, recipients[i], royalties[i]);
             }
@@ -295,24 +303,27 @@ contract Marketplace is
         remainingAmount -= totalRoyalties;
 
         // Transfer remaining amount to seller
-        bool sellerPaid = paymentToken.transferFrom(
-            buyer,
-            listing.seller,
-            remainingAmount
-        );
-        if (!sellerPaid) revert TransferFailed();
+        paymentToken.safeTransferFrom(buyer, listing.seller, remainingAmount);
 
         return totalPrice;
     }
 
+    // slither-disable-next-line calls-loop
     function _processPurchase(uint256 listingId, uint256 amount) internal {
+        if (listingId == 0) revert InvalidListingId();
+        if (amount == 0) revert InvalidAmount();
         Listing storage listing = listings[listingId];
         if (!listing.active) revert ListingNotActive();
         if (amount > listing.amount) revert InvalidAmount();
 
-        uint256 totalPrice = _handlePayment(listingId, amount, msg.sender);
+        // EFFECTS: Update state first.
+        listing.amount -= amount;
+        if (listing.amount == 0) {
+            listing.active = false;
+        }
 
-        // Transfer tokens to buyer
+        // INTERACTIONS: Now perform external calls.
+        uint256 totalPrice = _handlePayment(listingId, amount, msg.sender);
         rwaToken.safeTransferFrom(
             address(this),
             msg.sender,
@@ -320,12 +331,6 @@ contract Marketplace is
             amount,
             ""
         );
-
-        // Update listing
-        listing.amount -= amount;
-        if (listing.amount == 0) {
-            listing.active = false;
-        }
 
         emit ListingSold(
             listingId,
@@ -340,9 +345,10 @@ contract Marketplace is
     function emergencyWithdraw(
         address token,
         uint256 tokenId,
-        uint256 amount
+        uint256 amount,
+        address admin
     ) external onlyOwner nonReentrant {
-        if (!emergencyStop) revert EmergencyStopActive();
+        if (!paused()) revert EmergencyStopActive();
 
         if (token == address(0)) {
             (bool success, ) = msg.sender.call{value: amount}("");
@@ -350,7 +356,7 @@ contract Marketplace is
         } else {
             IERC1155(token).safeTransferFrom(
                 address(this),
-                msg.sender,
+                admin,
                 tokenId,
                 amount,
                 ""

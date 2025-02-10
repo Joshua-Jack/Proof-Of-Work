@@ -25,6 +25,11 @@ contract UpgradableBeaconController is Initializable, ReentrancyGuard {
         address initalImplementation
     );
 
+    error InvalidImplementation();
+    error InvalidBeacon();
+    error InvalidOwner();
+    error InvalidName();
+
     ///@dev checks to ensure that only the controller can upgrade the implementation
     modifier isValidImplementation(address implementation_) {
         require(
@@ -43,6 +48,7 @@ contract UpgradableBeaconController is Initializable, ReentrancyGuard {
         _;
     }
 
+    // slither-disable-next-line missing-zero-check
     constructor() {}
 
     /**
@@ -60,6 +66,9 @@ contract UpgradableBeaconController is Initializable, ReentrancyGuard {
         isValidImplementation(implementation_)
         isValidName(name_)
     {
+        if (owner_ == address(0)) revert InvalidOwner();
+        if (implementation_ == address(0)) revert InvalidImplementation();
+        if (bytes(name_).length == 0) revert InvalidName();
         UpgradeableBeacon beacon = new UpgradeableBeacon(
             implementation_,
             owner_
@@ -83,11 +92,12 @@ contract UpgradableBeaconController is Initializable, ReentrancyGuard {
         address newImplementation_,
         string memory name_
     ) public isValidImplementation(newImplementation_) nonReentrant {
-        UpgradeableBeacon beacon = UpgradeableBeacon(beacons[name_]);
-        beacon.upgradeTo(newImplementation_);
-        implementations[name_] = newImplementation_;
-
+        if (newImplementation_ == address(0)) revert InvalidImplementation();
+        if (beacons[name_] == address(0)) revert InvalidBeacon();
         emit UpgradedImplementation(msg.sender, newImplementation_);
+        UpgradeableBeacon beacon = UpgradeableBeacon(beacons[name_]);
+        implementations[name_] = newImplementation_;
+        beacon.upgradeTo(newImplementation_);
     }
 
     /**

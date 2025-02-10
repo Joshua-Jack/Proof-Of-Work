@@ -86,4 +86,10 @@ contract ContractStorage is Ownable, IContractStorage {
     ) external view returns (ContractData memory) {
         return _contracts[id_];
     }
+
+    /// @notice Retrieves all contract addresses.
+    /// @return An array of contract addresses.
+    function getAllContracts() external view returns (address[] memory) {
+        return allContracts;
+    }
 }

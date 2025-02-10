@@ -28,7 +28,8 @@ contract ERC1155RWA is
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant ROYALTY_ROLE = keccak256("ROYALTY_ROLE");
 
-    uint256 private _nextTokenId;
+    uint256 _nextTokenId;
+    uint256 constant MAX_ROYALTY_RECIPIENTS = 10;
 
     struct RoyaltyInfo {
         address[] recipients;
@@ -37,7 +38,7 @@ contract ERC1155RWA is
     }
 
     struct Asset {
-        uint256 totalSupply;
+        uint256 totalShares;
         string metadataURI; // IPFS hash containing all metadata and regulatory info
         RoyaltyInfo royalties;
     }
@@ -97,11 +98,19 @@ contract ERC1155RWA is
         returns (uint256)
     {
         require(bytes(metadataURI).length > 0, "Metadata URI cannot be empty");
+        require(
+            royaltyRecipients.length <= MAX_ROYALTY_RECIPIENTS,
+            "Too many royalty recipients"
+        );
+        require(
+            royaltyRecipients.length == royaltyShares.length,
+            "Arrays length mismatch"
+        );
 
         uint256 tokenId = _nextTokenId++;
 
         Asset storage newAsset = assets[tokenId];
-        newAsset.totalSupply = initialSupply;
+        newAsset.totalShares = initialSupply;
         newAsset.metadataURI = metadataURI;
 
         if (royaltyRecipients.length > 0) {
@@ -126,27 +135,26 @@ contract ERC1155RWA is
         nonReentrant
         returns (uint256[] memory)
     {
+        uint256 batchLength = initialSupplies.length;
         require(
-            initialSupplies.length == metadataURIs.length &&
-                initialSupplies.length == royaltyRecipients.length &&
-                initialSupplies.length == royaltyShares.length,
+            batchLength == metadataURIs.length &&
+                batchLength == royaltyRecipients.length &&
+                batchLength == royaltyShares.length,
             "Array lengths must match"
         );
 
-        uint256[] memory tokenIds = new uint256[](initialSupplies.length);
+        uint256[] memory tokenIds = new uint256[](batchLength);
 
-        for (uint256 i = 0; i < initialSupplies.length; i++) {
+        for (uint256 i = 0; i < batchLength; i++) {
             require(
                 bytes(metadataURIs[i]).length > 0,
                 "Metadata URI cannot be empty"
             );
 
             tokenIds[i] = _nextTokenId++;
-
             Asset storage newAsset = assets[tokenIds[i]];
-            newAsset.totalSupply = initialSupplies[i];
+            newAsset.totalShares = initialSupplies[i];
             newAsset.metadataURI = metadataURIs[i];
-
             if (royaltyRecipients[i].length > 0) {
                 setRoyalties(
                     tokenIds[i],
@@ -154,7 +162,9 @@ contract ERC1155RWA is
                     royaltyShares[i]
                 );
             }
+        }
 
+        for (uint256 i = 0; i < batchLength; i++) {
             _mint(msg.sender, tokenIds[i], initialSupplies[i], "");
         }
 
@@ -172,9 +182,9 @@ contract ERC1155RWA is
                 hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
             "Caller must have royalty role"
         );
+
         require(recipients.length == shares.length, "Arrays length mismatch");
         require(_exists(tokenId), "Token does not exist");
-
         uint256 totalShares = 0;
         for (uint256 i = 0; i < shares.length; i++) {
             require(recipients[i] != address(0), "Invalid recipient");
@@ -262,21 +272,21 @@ contract ERC1155RWA is
     }
 
     function getAssetInfo(
-        uint256 tokenId
+        uint256 tokenId_
     )
         external
         view
         returns (
-            uint256 totalSupply,
+            uint256 totalShares,
             string memory metadataURI,
             address[] memory royaltyRecipients,
             uint256[] memory royaltyShares
         )
     {
-        require(_exists(tokenId), "Token does not exist");
-        Asset storage asset = assets[tokenId];
+        require(_exists(tokenId_), "Token does not exist");
+        Asset storage asset = assets[tokenId_];
         return (
-            asset.totalSupply,
+            asset.totalShares,
             asset.metadataURI,
             asset.royalties.recipients,
             asset.royalties.shares
@@ -288,7 +298,7 @@ contract ERC1155RWA is
     }
 
     function _exists(uint256 tokenId) internal view returns (bool) {
-        return tokenId < _nextTokenId && assets[tokenId].totalSupply > 0;
+        return tokenId < _nextTokenId && assets[tokenId].totalShares > 0;
     }
 
     function uri(

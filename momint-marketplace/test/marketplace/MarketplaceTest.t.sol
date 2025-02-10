@@ -32,21 +32,39 @@ contract MarketplaceTest is Test {
     uint256 constant INITIAL_BALANCE = 10000 * 10 ** 18; // 10000 USDC
     uint256 constant INITIAL_SUPPLY = 100;
     string constant LISK_RPC_URL = "https://rpc.api.lisk.com";
-    uint256 constant FORK_BLOCK_NUMBER = 1234567; // We'll need the actual block number
+    uint256 constant FORK_BLOCK_NUMBER = 11774326; // We'll need the actual block number
     address constant LISK_TOKEN = 0xac485391EB2d7D88253a7F1eF18C37f4242D1A24;
-    address constant USDT = 0x05D032ac25d322df992303dCa074EE7392C117b9;
+    IERC20 public USDT = IERC20(0x05D032ac25d322df992303dCa074EE7392C117b9);
     address LISK_WHALE = 0xC8CFB2922414DcD4Eb61380A8b59bB8166c225f1; // We'll need a whale address
     // Test addresses
     address public admin = 0x8907C46657c18C7E12efCe6aE7E820cC12Ee2d61;
     address public seller = 0xC20e318fe1830DE929bB8eE57F6209a89F0ab00F;
-    address public buyer = 0xC287129dcB73bd7065C3fB97f7FB7981f59166EB;
+    address public buyer = 0x07aE8551Be970cB1cCa11Dd7a11F47Ae82e70E67;
     address public feeRecipient = 0x3031B7445F27D68d19B8A3aAeDE9F036945D9c60;
     address public pauseController;
 
+    event FeeRecipientUpdated(
+        address indexed marketplace,
+        address newFeeRecipient
+    );
+    event ProtocolFeeUpdated(
+        address indexed marketplace,
+        uint256 newProtocolFee
+    );
+    event EmergencyWithdraw(
+        address indexed marketplace,
+        address indexed token,
+        uint256 indexed tokenId,
+        uint256 amount
+    );
+    event EmergencyStopToggled(address indexed marketplace, bool emergencyStop);
+    event Paused(address account);
+    event Unpaused(address account);
+
     function setUp() public {
         // Create fork
-        vm.createSelectFork(LISK_RPC_URL, FORK_BLOCK_NUMBER);
-
+        uint256 lisk = vm.createFork(LISK_RPC_URL, FORK_BLOCK_NUMBER);
+        vm.selectFork(lisk);
         // Deploy controllers
         beaconController = new UpgradableBeaconController();
         marketplaceController = new MarketplaceController(admin);
@@ -83,7 +101,7 @@ contract MarketplaceTest is Test {
         );
 
         rwaToken = ERC1155RWA(address(rwaProxy));
-
+        vm.makePersistent(address(rwaToken));
         // Deploy marketplace implementation
         implementation = new Marketplace();
 
@@ -106,7 +124,7 @@ contract MarketplaceTest is Test {
         );
 
         marketplace = Marketplace(address(proxy));
-
+        vm.makePersistent(address(marketplace));
         // Transfer ownership of marketplace to controller
         marketplace.transferOwnership(address(marketplaceController));
 
@@ -124,7 +142,7 @@ contract MarketplaceTest is Test {
         vm.stopPrank();
     }
 
-    function test_case1() public {
+    function test_case1() public view {
         console.log(Styles.h1("Marketplace Test"));
         marketplaceInitialization();
         console.log("");
@@ -348,7 +366,7 @@ contract MarketplaceTest is Test {
         console.log("");
     }
 
-    function marketplaceInitialization() public {
+    function marketplaceInitialization() public view {
         assertEq(address(marketplace.rwaToken()), address(rwaToken));
         console.log("");
         console.log(Styles.p("ERC1155RWA:"), StdStyle.green(address(rwaToken)));
@@ -515,7 +533,7 @@ contract MarketplaceTest is Test {
         console.log("");
         console.log(
             Styles.p("USDT Whitelisted:"),
-            StdStyle.green(marketplace.acceptedTokens(USDT))
+            StdStyle.green(marketplace.acceptedTokens(address(USDT)))
         );
         console.log("");
         marketplaceController.setAcceptedToken(
@@ -528,7 +546,7 @@ contract MarketplaceTest is Test {
         console.log("");
         console.log(
             Styles.p("USDT Whitelisted:"),
-            StdStyle.green(marketplace.acceptedTokens(USDT))
+            StdStyle.green(marketplace.acceptedTokens(address(USDT)))
         );
         console.log("");
         vm.stopPrank();
@@ -648,6 +666,25 @@ contract MarketplaceTest is Test {
         assertTrue(listingActive);
     }
 
+    // Create a struct to hold test data
+    struct TestSetup {
+        uint256 tokenId;
+        uint256 listingAmount;
+        uint256 listingPrice;
+        uint256 purchaseAmount;
+        address[] royaltyRecipients;
+        uint256[] royaltyShares;
+    }
+
+    // Helper struct for purchase calculations
+    struct PurchaseCalc {
+        uint256 totalCost;
+        uint256 protocolFeeAmount;
+        uint256 totalRoyalties;
+        uint256[] royaltyAmounts;
+        uint256 sellerRevenue;
+    }
+
     function purchaseWithLiskToken() public {
         console.log("");
         console.log(Styles.h1("RWA Token Purchase Test with Royalties"));
@@ -656,75 +693,18 @@ contract MarketplaceTest is Test {
         );
         console.log("");
 
-        // Get initial protocol fee from contract
         uint256 currentProtocolFee = marketplace.protocolFee();
-        console.log(Styles.h2("Protocol Fee Configuration"));
-        console.log(
-            Styles.p("Current Protocol Fee:"),
-            StdStyle.green(
-                string.concat(vm.toString(currentProtocolFee / 100), "%")
-            )
-        );
+        TestSetup memory setup = setupTestData();
 
-        // Setup royalty recipients with actual contract values
+        // Setup phase
         vm.startPrank(admin);
-        address[] memory royaltyRecipients = new address[](2);
-        royaltyRecipients[0] = makeAddr("royalty1");
-        royaltyRecipients[1] = makeAddr("royalty2");
-        uint256[] memory royaltyShares = new uint256[](2);
-        royaltyShares[0] = 500; // 5%
-        royaltyShares[1] = 300; // 3%
-
-        // Mint token with royalties
-        uint256 tokenId = rwaToken.mint(
-            INITIAL_SUPPLY,
-            "ipfs://metadata",
-            royaltyRecipients,
-            royaltyShares
+        rwaToken.safeTransferFrom(
+            admin,
+            seller,
+            setup.tokenId,
+            setup.listingAmount,
+            ""
         );
-
-        // Get actual token info from contract
-        (
-            uint256 actualSupply,
-            string memory actualUri,
-            address[] memory actualRecipients,
-            uint256[] memory actualShares
-        ) = rwaToken.getAssetInfo(tokenId);
-
-        console.log(Styles.h2("Token Configuration"));
-        console.log(Styles.p("Token ID:"), StdStyle.green(tokenId));
-        console.log(Styles.p("Total Supply:"), StdStyle.green(actualSupply));
-        console.log(Styles.p("Token URI:"), StdStyle.green(actualUri));
-        console.log("");
-        console.log(Styles.h2("Royalty Structure"));
-        for (uint i = 0; i < actualRecipients.length; i++) {
-            console.log(
-                Styles.p(string.concat("Recipient ", vm.toString(i + 1), ":")),
-                StdStyle.green(actualRecipients[i])
-            );
-            console.log(
-                Styles.p(string.concat("Share ", vm.toString(i + 1), ":")),
-                StdStyle.green(
-                    string.concat(vm.toString(actualShares[i] / 100), "%")
-                )
-            );
-        }
-
-        // Transfer tokens to seller
-        uint256 sellerAmount = actualSupply / 2;
-        rwaToken.safeTransferFrom(admin, seller, tokenId, sellerAmount, "");
-        console.log("");
-        console.log(Styles.h2("Token Distribution"));
-        console.log(
-            Styles.p("Tokens Transferred to Seller:"),
-            StdStyle.green(sellerAmount)
-        );
-        console.log(
-            Styles.p("Seller Balance:"),
-            StdStyle.green(rwaToken.balanceOf(seller, tokenId))
-        );
-
-        // Whitelist payment token
         marketplaceController.setAcceptedToken(
             address(marketplace),
             LISK_TOKEN,
@@ -735,204 +715,312 @@ contract MarketplaceTest is Test {
         // Create listing
         vm.startPrank(seller);
         rwaToken.setApprovalForAll(address(marketplace), true);
-        uint256 listingAmount = sellerAmount / 2;
-        uint256 listingPrice = 10 ether; // 10 LISK per token
-
         uint256 listingId = marketplace.createListing(
-            tokenId,
-            listingAmount,
-            listingPrice,
+            setup.tokenId,
+            setup.listingAmount,
+            setup.listingPrice,
             LISK_TOKEN
-        );
-
-        // Get actual listing details from contract
-        (
-            address actualSeller,
-            uint256 actualTokenId,
-            uint256 actualAmount,
-            uint256 actualPrice,
-            address actualPaymentToken,
-            bool isActive
-        ) = marketplace.listings(listingId);
-
-        console.log("");
-        console.log(Styles.h2("Listing Details"));
-        console.log(Styles.p("Listing ID:"), StdStyle.green(listingId));
-        console.log(Styles.p("Seller:"), StdStyle.green(actualSeller));
-        console.log(Styles.p("Amount Listed:"), StdStyle.green(actualAmount));
-        console.log(
-            Styles.p("Price Per Token:"),
-            StdStyle.green(
-                string.concat(vm.toString(actualPrice / 1 ether), " LISK")
-            )
         );
         vm.stopPrank();
 
-        // Fund buyer
+        // Fund buyer with sufficient LISK tokens
         vm.startPrank(LISK_WHALE);
-        uint256 purchaseAmount = actualAmount / 2;
-        uint256 requiredBalance = purchaseAmount * actualPrice;
-        IERC20(LISK_TOKEN).transfer(buyer, requiredBalance * 2); // Extra for safety
+        uint256 requiredBalance = setup.purchaseAmount * setup.listingPrice;
+        // Add extra buffer for fees
+        uint256 bufferAmount = (requiredBalance * 1000) / 10000; // 10% buffer
+        IERC20(LISK_TOKEN).transfer(buyer, requiredBalance + bufferAmount);
         vm.stopPrank();
 
         // Execute purchase
         vm.startPrank(buyer);
         IERC20(LISK_TOKEN).approve(address(marketplace), type(uint256).max);
+        marketplace.buyTokens(listingId, setup.purchaseAmount);
+        vm.stopPrank();
 
-        uint256 totalCost = purchaseAmount * listingPrice;
-        uint256 protocolFeeAmount = (totalCost * currentProtocolFee) / 10000;
-        uint256[] memory royaltyAmounts = new uint256[](
-            actualRecipients.length
+        // Verify balances and ownership
+        assertEq(
+            rwaToken.balanceOf(buyer, setup.tokenId),
+            setup.purchaseAmount,
+            "Buyer should receive correct RWA tokens"
         );
-        uint256 totalRoyalties = 0;
+        assertEq(
+            IERC20(LISK_TOKEN).balanceOf(address(marketplace)),
+            0,
+            "Marketplace should not hold LISK tokens"
+        );
+    }
 
-        console.log("");
-        console.log(Styles.h2("Transaction Details"));
-        console.log(
-            Styles.p("Purchase Amount:"),
-            StdStyle.green(
-                string.concat(vm.toString(purchaseAmount), " tokens")
-            )
-        );
-        console.log(
-            Styles.p("Price Per Token:"),
-            StdStyle.green(
-                string.concat(vm.toString(listingPrice / 1 ether), " LISK")
-            )
-        );
-        console.log(
-            Styles.p("Total Cost:"),
-            StdStyle.green(
-                string.concat(vm.toString(totalCost / 1 ether), " LISK")
-            )
-        );
-        console.log("");
+    function setupTestData() internal returns (TestSetup memory setup) {
+        setup.royaltyRecipients = new address[](2);
+        setup.royaltyRecipients[0] = makeAddr("royalty1");
+        setup.royaltyRecipients[1] = makeAddr("royalty2");
 
-        // Calculate royalties
-        for (uint i = 0; i < actualRecipients.length; i++) {
-            royaltyAmounts[i] = (totalCost * actualShares[i]) / 10000; // 10000 basis points = 100%
-            totalRoyalties += royaltyAmounts[i];
+        setup.royaltyShares = new uint256[](2);
+        setup.royaltyShares[0] = 500; // 5%
+        setup.royaltyShares[1] = 300; // 3%
 
-            console.log(
-                Styles.p(
-                    string.concat(
-                        "Royalty ",
-                        vm.toString(i + 1),
-                        " (",
-                        vm.toString(actualShares[i] / 100),
-                        "%): "
-                    )
-                ),
-                StdStyle.green(
-                    string.concat(
-                        vm.toString(royaltyAmounts[i] / 1 ether),
-                        " LISK"
-                    )
-                )
-            );
+        vm.startPrank(admin);
+        setup.tokenId = rwaToken.mint(
+            INITIAL_SUPPLY,
+            "ipfs://metadata",
+            setup.royaltyRecipients,
+            setup.royaltyShares
+        );
+        vm.stopPrank();
+
+        setup.listingAmount = INITIAL_SUPPLY / 4;
+        setup.listingPrice = 1 ether; // More reasonable price
+        setup.purchaseAmount = setup.listingAmount / 2;
+
+        return setup;
+    }
+
+    function test_MarketplaceController_PauseUnpause() public {
+        console.log(Styles.h1("Marketplace Controller: Pause/Unpause Tests"));
+
+        // Start as admin
+        vm.startPrank(admin);
+
+        // Grant pause role to admin for testing
+        marketplaceController.grantRole(
+            marketplaceController.PAUSE_CONTROLLER_ROLE(),
+            admin
+        );
+
+        // Test pause
+        marketplaceController.pauseMarketplace(address(marketplace));
+        assertTrue(marketplace.paused(), "Marketplace should be paused");
+
+        // Test unpause
+        marketplaceController.unpauseMarketplace(address(marketplace));
+        assertFalse(marketplace.paused(), "Marketplace should be unpaused");
+
+        vm.stopPrank();
+    }
+
+    function test_BatchBuyTokens_MultipleListings() public {
+        // Setup multiple listings
+        TestSetup memory setup = setupTestData();
+        uint256[] memory listingIds = new uint256[](3);
+        uint256[] memory amounts = new uint256[](3);
+
+        // Create multiple listings with USDT as payment token (1 USDT per token)
+        vm.startPrank(admin);
+        marketplaceController.setAcceptedToken(
+            address(marketplace),
+            address(USDT),
+            true
+        );
+        vm.stopPrank();
+
+        for (uint256 i = 0; i < 3; i++) {
+            listingIds[i] = _createListing(setup.tokenId, 10, 1000000); // 1 USDT (6 decimals)
+            amounts[i] = 3;
         }
 
-        // Calculate protocol fee
-        console.log(
-            Styles.p(
-                string.concat(
-                    "Protocol Fee (",
-                    vm.toString(currentProtocolFee / 100),
-                    "%): "
-                )
-            ),
-            StdStyle.green(
-                string.concat(vm.toString(protocolFeeAmount / 1 ether), " LISK")
-            )
+        // Setup buyer with USDT
+        vm.startPrank(LISK_WHALE);
+        IERC20(LISK_TOKEN).transfer(buyer, 1000 * 10 ** 6); // Transfer 1000 USDT to buyer
+        vm.stopPrank();
+
+        // Execute batch purchase
+        vm.startPrank(buyer);
+        IERC20(LISK_TOKEN).approve(address(marketplace), type(uint256).max);
+        USDT.approve(address(marketplace), type(uint256).max);
+        uint256 USDT_BALANCE = IERC20(LISK_TOKEN).balanceOf(buyer);
+        console.log("USDT Balance:", USDT_BALANCE);
+        marketplace.batchBuyTokens(listingIds, amounts);
+        vm.stopPrank();
+
+        // Verify results
+        assertEq(
+            rwaToken.balanceOf(buyer, setup.tokenId),
+            9,
+            "Buyer should have received 9 tokens total"
         );
 
-        uint256 sellerRevenue = totalCost - protocolFeeAmount - totalRoyalties;
-        console.log(
-            Styles.p("Seller Revenue: "),
-            StdStyle.green(
-                string.concat(vm.toString(sellerRevenue / 1 ether), " LISK")
-            )
-        );
+        // Verify listing states
+        for (uint256 i = 0; i < 3; i++) {
+            (, , , , , bool active) = marketplace.listings(listingIds[i]);
+            assertTrue(active, "Listing should still be active");
 
-        // Execute purchase
-        marketplace.buyTokens(listingId, purchaseAmount);
-
-        // Log final balances with proper decimal handling
-        console.log("");
-        console.log(Styles.h2("Final Balances"));
-
-        // Seller
-        uint256 finalSellerBalance = IERC20(LISK_TOKEN).balanceOf(seller);
-        console.log(
-            Styles.p("Seller LISK Balance:"),
-            StdStyle.green(
-                string.concat(
-                    vm.toString(finalSellerBalance / 1 ether),
-                    " LISK"
-                )
-            )
-        );
-
-        // Protocol Fee Recipient
-        uint256 finalFeeRecipientBalance = IERC20(LISK_TOKEN).balanceOf(
-            marketplace.feeRecipient()
-        );
-        console.log(
-            Styles.p("Protocol Fee Recipient Balance:"),
-            StdStyle.green(
-                string.concat(
-                    vm.toString(finalFeeRecipientBalance / 1 ether),
-                    " LISK"
-                )
-            )
-        );
-
-        // Royalty Recipients
-        for (uint i = 0; i < actualRecipients.length; i++) {
-            uint256 recipientBalance = IERC20(LISK_TOKEN).balanceOf(
-                actualRecipients[i]
+            // Verify remaining amounts
+            (, , uint256 remainingAmount, , , ) = marketplace.listings(
+                listingIds[i]
             );
-            console.log(
-                Styles.p(
-                    string.concat(
-                        "Royalty Recipient ",
-                        vm.toString(i + 1),
-                        " Balance:"
-                    )
-                ),
-                StdStyle.green(
-                    string.concat(
-                        vm.toString(recipientBalance / 1 ether),
-                        " LISK"
-                    )
-                )
+            assertEq(
+                remainingAmount,
+                7,
+                "Listing should have 7 tokens remaining"
             );
         }
+    }
 
-        // Buyer's token balance
-        uint256 buyerTokenBalance = rwaToken.balanceOf(buyer, tokenId);
-        console.log(
-            Styles.p("Buyer RWA Token Balance:"),
-            StdStyle.green(
-                string.concat(vm.toString(buyerTokenBalance), " tokens")
+    function test_RevertWhen_BatchBuyTokens_ArrayMismatch() public {
+        uint256[] memory listingIds = new uint256[](2);
+        uint256[] memory amounts = new uint256[](3);
+
+        vm.expectRevert(Marketplace.ArrayLengthMismatch.selector);
+        marketplace.batchBuyTokens(listingIds, amounts);
+    }
+
+    function test_RevertWhen_BatchBuyTokens_ExceedsMaxLength() public {
+        uint256[] memory listingIds = new uint256[](11); // MAX_ARRAY_LENGTH is 10
+        uint256[] memory amounts = new uint256[](11);
+
+        vm.expectRevert(Marketplace.ArrayLengthTooLong.selector);
+        marketplace.batchBuyTokens(listingIds, amounts);
+    }
+
+    function test_MarketplaceController_AccessControl() public {
+        console.log(Styles.h1("Marketplace Controller: Access Control Tests"));
+
+        address unauthorized = makeAddr("unauthorized");
+
+        vm.startPrank(unauthorized);
+
+        // Test unauthorized pause
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                marketplaceController.PAUSE_CONTROLLER_ROLE()
             )
+        );
+        marketplaceController.pauseMarketplace(address(marketplace));
+
+        // Test unauthorized protocol fee update
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                marketplaceController.MARKETPLACE_CONTROLLER_ROLE()
+            )
+        );
+        marketplaceController.setProtocolFee(address(marketplace), 300);
+
+        // Test unauthorized token acceptance update
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AccessControlUnauthorizedAccount.selector,
+                unauthorized,
+                marketplaceController.MARKETPLACE_CONTROLLER_ROLE()
+            )
+        );
+        marketplaceController.setAcceptedToken(
+            address(marketplace),
+            address(0x1),
+            true
         );
 
         vm.stopPrank();
     }
 
-    // Helper function to log token balances
-    function logBalance(
-        string memory label,
-        address account,
-        address token
-    ) internal view {
-        uint256 balance = IERC20(token).balanceOf(account);
-        console.log(
-            Styles.p(label),
-            StdStyle.green(
-                string.concat(vm.toString(balance / 1 ether), " LISK")
+    // Helper function for creating and minting a token
+    function _createAndMintToken() internal returns (uint256) {
+        vm.startPrank(admin);
+        uint256 tokenId = rwaToken.mint(
+            100,
+            "ipfs://test",
+            new address[](0),
+            new uint256[](0)
+        );
+        vm.stopPrank();
+        return tokenId;
+    }
+
+    // Helper function for creating a listing
+    function _createListing(
+        uint256 tokenId,
+        uint256 amount,
+        uint256 pricePerToken
+    ) internal returns (uint256) {
+        vm.startPrank(admin);
+        rwaToken.setApprovalForAll(address(marketplace), true);
+        uint256 listingId = marketplace.createListing(
+            tokenId,
+            amount,
+            pricePerToken,
+            address(USDT)
+        );
+        vm.stopPrank();
+        return listingId;
+    }
+
+    function test_EmergencyWithdraw() public {
+        console.log(Styles.h1("Emergency Withdraw Tests"));
+        uint256 tokenId = _createAndMintToken();
+        uint256 listingId = _createListing(tokenId, 100, 1 ether);
+
+        vm.startPrank(admin);
+        marketplaceController.pauseMarketplace(address(marketplace));
+        uint256 balanceBefore = rwaToken.balanceOf(admin, tokenId);
+        uint256 marketplaceBalanceBefore = rwaToken.balanceOf(
+            address(marketplace),
+            tokenId
+        );
+        marketplaceController.emergencyWithdraw(
+            address(marketplace),
+            address(rwaToken),
+            tokenId,
+            10,
+            admin
+        );
+        assertEq(
+            rwaToken.balanceOf(admin, tokenId),
+            balanceBefore + 10,
+            "Admin should receive 10 tokens"
+        );
+        assertEq(
+            rwaToken.balanceOf(address(marketplace), tokenId),
+            marketplaceBalanceBefore - 10,
+            "Marketplace should receive 10 tokens"
+        );
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_EmergencyWithdraw_NotPaused() public {
+        console.log(Styles.h1("Emergency Withdraw Tests"));
+        uint256 tokenId = _createAndMintToken();
+        uint256 listingId = _createListing(tokenId, 100, 1 ether);
+
+        vm.startPrank(admin);
+        vm.expectRevert(Marketplace.EmergencyStopActive.selector);
+        marketplaceController.emergencyWithdraw(
+            address(marketplace),
+            address(rwaToken),
+            tokenId,
+            10,
+            admin
+        );
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_UnauthorizedPauseUnpause() public {
+        console.log(Styles.h1("Unauthorized Pause/Unpause Tests"));
+
+        address unauthorized = makeAddr("unauthorized");
+
+        vm.startPrank(unauthorized);
+
+        // Test unauthorized pause
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "OwnableUnauthorizedAccount(address)",
+                unauthorized
             )
         );
+        marketplace.pause();
+
+        // Test unauthorized unpause
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "OwnableUnauthorizedAccount(address)",
+                unauthorized
+            )
+        );
+        marketplace.unpause();
+
+        vm.stopPrank();
     }
 }

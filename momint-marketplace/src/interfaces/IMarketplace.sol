@@ -8,6 +8,13 @@ interface IMarketplace {
 
     function setAcceptedToken(address token, bool accepted) external;
 
+    function emergencyWithdraw(
+        address token,
+        uint256 tokenId,
+        uint256 amount,
+        address admin
+    ) external;
+
     function pause() external;
 
     function unpause() external;

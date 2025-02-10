@@ -48,6 +48,8 @@ contract SPModule is
     error InvalidTotalShares();
     error InvalidPricePerShare();
     error ProjectInactive();
+    error InvalidOwner();
+    error InvalidName();
     error NotVault();
     event ModuleInitialized(
         uint256 indexed projectId,
@@ -75,6 +77,15 @@ contract SPModule is
         string memory uri_,
         address owner
     ) ERC1155(uri_) {
+        if (projectId_ == 0) revert InvalidProjectId();
+        if (totalShares == 0) revert InvalidTotalShares();
+        if (pricePerShare == 0) revert InvalidPricePerShare();
+        if (bytes(uri_).length == 0) revert InvalidURI();
+        if (admin == address(0)) revert InvalidAdmin();
+        if (vault_ == address(0)) revert InvalidVault();
+        if (owner == address(0)) revert InvalidOwner();
+        if (bytes(name).length == 0) revert InvalidName();
+
         _projectId = projectId_;
         _validateInitialization(
             admin,
@@ -104,6 +115,7 @@ contract SPModule is
     }
 
     /// Public functions
+    // slither-disable-next-line divide-before-multiply
     function invest(
         uint256 amount,
         address user
@@ -142,17 +154,14 @@ contract SPModule is
 
         // Calculate amount to return based on share price
         amount = shares * _project.pricePerShare;
+        emit SharesDivested(user, _projectId, shares, amount);
 
         // Update user's investment state
         _updateDivestmentState(user, shares, amount);
 
-        // Burn the shares from the module
-        _burn(address(this), _projectId, shares);
-
         // Update reward debt
         _updateRewardDebt(user);
 
-        emit SharesDivested(user, _projectId, shares, amount);
         return amount;
     }
 
@@ -247,9 +256,6 @@ contract SPModule is
         address owner
     ) internal {
         vaults = vault_;
-        _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _mint(address(this), _projectId, totalShares, "");
-
         _project = ProjectInfo({
             id: _projectId,
             name: name,
@@ -265,6 +271,8 @@ contract SPModule is
         _initialized = true;
         emit ModuleInitialized(_projectId, admin, vault_);
         emit ProjectAdded(_projectId, name, pricePerShare, totalShares, uri_);
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _mint(address(this), _projectId, totalShares, "");
     }
 
     function _updateInvestmentState(

@@ -93,29 +93,6 @@ library VaultHelper {
 
     event ModuleAssetsReturned(address indexed module, uint256 amount);
 
-    function getActiveModules(
-        Module[] storage modules
-    ) public view returns (Module[] memory activeModules) {
-        uint256 length = modules.length;
-        uint256 count;
-
-        for (uint256 i = 0; i < length; i++) {
-            if (modules[i].active) {
-                count++;
-            }
-        }
-
-        activeModules = new Module[](count);
-        uint256 index;
-
-        for (uint256 i = 0; i < length; i++) {
-            if (modules[i].active) {
-                activeModules[index] = modules[i];
-                index++;
-            }
-        }
-    }
-
     function validateVaultParameters(
         IERC20 baseAsset_,
         uint8 decimalOffset,

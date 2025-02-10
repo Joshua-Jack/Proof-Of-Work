@@ -34,6 +34,9 @@ contract MomintVaultTests is TestSetup {
     error InvalidFeeRecipient();
     error InvalidAssetAddress();
     error EnforcedPause();
+    error AlreadyClaimed();
+    error InvalidEpochId();
+    error InvalidModuleAddress();
 
     event SharesAllocated(
         address indexed user,
@@ -49,8 +52,12 @@ contract MomintVaultTests is TestSetup {
         // Create mock module
         mockModule = _createMockModule(admin);
 
-        // Make sure admin has necessary permissions
+        // Make sure admin has necessary permissions and USDT
         vm.startPrank(admin);
+
+        // Deal USDT to admin for distributions
+        deal(address(USDT), admin, 1000000 * 10 ** 6); // 1M USDT
+
         // Initialize with default liquidity ratios
         uint16 defaultLiquidityHoldBP = 3000; // 30%
         uint16 defaultMaxOwnerShareBP = 7000; // 70%
@@ -59,6 +66,11 @@ contract MomintVaultTests is TestSetup {
             defaultMaxOwnerShareBP
         );
         vm.stopPrank();
+
+        // Deal USDT to users for deposits
+        deal(address(USDT), user1, 100000 * 10 ** 6); // 100k USDT
+        deal(address(USDT), user2, 100000 * 10 ** 6); // 100k USDT
+        deal(address(USDT), user3, 100000 * 10 ** 6); // 100k USDT
     }
 
     function test_vaultInfo() public view {
@@ -130,22 +142,15 @@ contract MomintVaultTests is TestSetup {
         vault.addModule(singleProjectModule, false, 0);
         vm.stopPrank();
 
+        // User2 deposits
         vm.startPrank(user2);
         USDT.approve(address(vault), 10e6);
         uint256 shares = vault.deposit(10e6, user2, 0);
-        console.log("User2 initial shares:", shares);
         vm.stopPrank();
 
-        vm.startPrank(user1);
-        console.log("Transferring USDT from user1 to admin...");
-        console.log("Initial user1 USDT balance:", USDT.balanceOf(user1));
-        USDT.transfer(admin, 100e6);
-        console.log("Final user1 USDT balance:", USDT.balanceOf(user1));
-        vm.stopPrank();
-
-        // Distribute returns
+        // Ensure admin has enough USDT for distribution
         vm.startPrank(admin);
-        USDT.approve(address(vault), 10e6); // Distribute 1 USDT as returns
+        USDT.approve(address(vault), 10e6);
         vault.distributeReturns(10e6, 0);
         vm.stopPrank();
 
@@ -750,11 +755,239 @@ contract MomintVaultTests is TestSetup {
         vm.stopPrank();
     }
 
+    function test_RevertWhen_ClaimingReturnsTwice() public {
+        // Setup and initial deposit
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        USDT.approve(address(vault), 100e6);
+        vault.deposit(100e6, user1, 0);
+        vm.stopPrank();
+
+        // Distribute returns
+        vm.startPrank(admin);
+        USDT.approve(address(vault), 10e6);
+        vault.distributeReturns(10e6, 0);
+        vm.stopPrank();
+
+        // First claim should succeed
+        vm.startPrank(user1);
+        vault.claimReturns(0, 1);
+
+        // Second claim should fail
+        vm.expectRevert(AlreadyClaimed.selector);
+        vault.claimReturns(0, 1);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_ClaimingWithPartialShares() public {
+        // Setup and initial deposit
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        // User1 deposits
+        vm.startPrank(user1);
+        USDT.approve(address(vault), 100e6);
+        uint256 shares = vault.deposit(100e6, user1, 0);
+        vm.stopPrank();
+
+        // Distribute returns
+        vm.startPrank(admin);
+        USDT.approve(address(vault), 10e6);
+        vault.distributeReturns(10e6, 0);
+        vm.stopPrank();
+
+        // Transfer half shares and try claims
+        vm.startPrank(user1);
+        vault.transfer(user2, shares / 2);
+
+        uint256 claimAmount = vault.claimReturns(0, 1);
+        assertLt(
+            claimAmount,
+            10e6,
+            "Claim amount should be less than total returns"
+        );
+        vm.stopPrank();
+    }
+
+    function test_setVaultFees() public {
+        vm.startPrank(admin);
+        VaultFees memory newFees = VaultFees({
+            depositFee: 300,
+            withdrawalFee: 200,
+            protocolFee: 400
+        });
+
+        vault.setVaultFees(newFees);
+
+        VaultFees memory updatedFees = vault.getVaultFees();
+        assertEq(updatedFees.depositFee, 300);
+        assertEq(updatedFees.withdrawalFee, 200);
+        assertEq(updatedFees.protocolFee, 400);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_NonOwnerSetsVaultFees() public {
+        vm.startPrank(user1);
+        VaultFees memory newFees = VaultFees({
+            depositFee: 300,
+            withdrawalFee: 200,
+            protocolFee: 400
+        });
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "OwnableUnauthorizedAccount(address)",
+                user1
+            )
+        );
+        vault.setVaultFees(newFees);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_AddingModuleWithInvalidAddress() public {
+        vm.startPrank(admin);
+        Module memory invalidModule = Module({
+            module: IModule(address(0)),
+            isSingleProject: true,
+            active: true
+        });
+
+        vm.expectRevert(InvalidModuleAddress.selector);
+        vault.addModule(invalidModule, false, 0);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_ClaimingInvalidEpoch() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+        vm.startPrank(user1);
+        vm.expectRevert(InvalidEpochId.selector);
+        vault.claimReturns(0, 0);
+        vm.stopPrank();
+    }
+
+    function test_MultipleEpochDistributions() public {
+        // Setup initial state
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        // User deposits
+        vm.startPrank(user1);
+        USDT.approve(address(vault), 100e6);
+        vault.deposit(100e6, user1, 0);
+        vm.stopPrank();
+
+        // Multiple distributions
+        vm.startPrank(admin);
+        USDT.approve(address(vault), 200e6);
+        vault.distributeReturns(100e6, 0);
+        vault.distributeReturns(100e6, 0);
+
+        // Verify epoch data
+        (uint256 id1, uint256 amount1, uint256 pending1) = vault.getEpochInfo(
+            1
+        );
+        (uint256 id2, uint256 amount2, uint256 pending2) = vault.getEpochInfo(
+            2
+        );
+
+        assertEq(id1, 1);
+        assertEq(id2, 2);
+        assertEq(amount1, 100e6);
+        assertEq(amount2, 100e6);
+        vm.stopPrank();
+    }
+
     function toWei(uint256 amount) internal pure returns (uint256) {
         return amount * PRECISION;
     }
 
     function fromWei(uint256 amount) internal pure returns (uint256) {
         return amount / PRECISION;
+    }
+
+    // Test edge cases for deposit
+    function test_deposit_ZeroShares() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        USDT.approve(address(vault), 1); // Tiny amount that would result in 0 shares
+        vm.expectRevert(InvalidAmount.selector);
+        vault.deposit(1, user1, 0);
+        vm.stopPrank();
+    }
+
+    // Test max deposit
+    function test_deposit_MaxAmount() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        uint256 maxAmount = type(uint256).max;
+        USDT.approve(address(vault), maxAmount);
+        vm.expectRevert(); // Should revert due to overflow
+        vault.deposit(maxAmount, user1, 0);
+        vm.stopPrank();
+    }
+
+    // Test withdraw edge cases
+    function test_RevertWhen_Withdraw_ZeroAmount() public {
+        vm.startPrank(user1);
+        vm.expectRevert(InvalidAmount.selector);
+        vault.withdraw(0, user1);
+        vm.stopPrank();
+    }
+
+    // Test conversion functions
+    function test_convertToShares() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        uint256 assets = 100e6;
+        uint256 shares = vault.convertToShares(assets);
+        assertGt(shares, 0, "Should convert to non-zero shares");
+    }
+
+    // Test preview functions
+    function test_previewMint() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        uint256 shares = 100e6;
+        uint256 assets = vault.previewMint(shares);
+        assertGt(assets, 0, "Should preview non-zero assets");
+    }
+
+    // Test maxDeposit and maxMint
+    function test_maxOperations() public {
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        uint256 maxDeposit = vault.maxDeposit(user1);
+        uint256 maxMint = vault.maxMint(user1);
+
+        assertGt(maxDeposit, 0, "Max deposit should be non-zero");
+        assertGt(maxMint, 0, "Max mint should be non-zero");
     }
 }

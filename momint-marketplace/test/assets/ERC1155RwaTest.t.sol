@@ -358,13 +358,16 @@ contract ERC1155RwaTest is Test {
         royaltyRecipients[0] = new address[](1);
         royaltyRecipients[0][0] = user1;
         royaltyShares[0] = new uint256[](1);
-        royaltyShares[0][0] = 500;
+        royaltyShares[0][0] = 500; // 5%
 
         // Second token royalties
         royaltyRecipients[1] = new address[](1);
         royaltyRecipients[1][0] = user2;
         royaltyShares[1] = new uint256[](1);
-        royaltyShares[1][0] = 300;
+        royaltyShares[1][0] = 300; // 3%
+
+        // Store initial token ID for assertions
+        uint256 initialTokenId = token.getCurrentTokenId();
 
         vm.startPrank(minter);
         uint256[] memory tokenIds = token.batchMint(
@@ -374,6 +377,58 @@ contract ERC1155RwaTest is Test {
             royaltyShares
         );
 
+        // Assert correct number of tokens minted
+        assertEq(tokenIds.length, 2, "Incorrect number of tokens minted");
+
+        // Assert token IDs are sequential
+        assertEq(tokenIds[0], initialTokenId, "First token ID incorrect");
+        assertEq(tokenIds[1], initialTokenId + 1, "Second token ID incorrect");
+
+        // Assert token supplies
+        assertEq(
+            token.totalSupply(tokenIds[0]),
+            supplies[0],
+            "Token 1 supply incorrect"
+        );
+        assertEq(
+            token.totalSupply(tokenIds[1]),
+            supplies[1],
+            "Token 2 supply incorrect"
+        );
+
+        // Assert URIs
+        assertEq(token.uri(tokenIds[0]), uris[0], "Token 1 URI incorrect");
+        assertEq(token.uri(tokenIds[1]), uris[1], "Token 2 URI incorrect");
+
+        // Assert royalty configurations
+        (address[] memory recipients1, uint256[] memory shares1) = token
+            .getRoyaltyDetails(tokenIds[0], 10000);
+        assertEq(recipients1.length, 1, "Token 1 recipient count incorrect");
+        assertEq(recipients1[0], user1, "Token 1 recipient incorrect");
+        assertEq(shares1[0], 500, "Token 1 royalty share incorrect");
+
+        (address[] memory recipients2, uint256[] memory shares2) = token
+            .getRoyaltyDetails(tokenIds[1], 10000);
+        assertEq(recipients2.length, 1, "Token 2 recipient count incorrect");
+        assertEq(recipients2[0], user2, "Token 2 recipient incorrect");
+        assertEq(shares2[0], 300, "Token 2 royalty share incorrect");
+
+        // Assert balances
+        assertEq(
+            token.balanceOf(minter, tokenIds[0]),
+            supplies[0],
+            "Minter balance for token 1 incorrect"
+        );
+        assertEq(
+            token.balanceOf(minter, tokenIds[1]),
+            supplies[1],
+            "Minter balance for token 2 incorrect"
+        );
+
+        vm.stopPrank();
+        console.log("");
+
+        // Original console logging for visual verification
         console.log(Styles.h2("Minted Tokens Results"));
         for (uint i = 0; i < tokenIds.length; i++) {
             (
@@ -402,9 +457,6 @@ contract ERC1155RwaTest is Test {
                 );
             }
         }
-
-        vm.stopPrank();
-        console.log("");
     }
 
     function test_RevertWhen_BatchMintWithMismatchedArrayLengths() public {

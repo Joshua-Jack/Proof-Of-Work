@@ -18,6 +18,7 @@ contract TestSetup is Test, Global {
 
     SPModule spModule;
     address spModuleAddress;
+
     uint256 lisk;
     string constant LISK_RPC_URL = "https://rpc.api.lisk.com";
     uint256 constant FORK_BLOCK_NUMBER = 11774326;

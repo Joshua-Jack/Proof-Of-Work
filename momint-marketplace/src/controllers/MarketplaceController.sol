@@ -39,6 +39,17 @@ contract MarketplaceController is AccessControl {
     /// @notice Emitted when a marketplace is unpaused
     event MarketplaceUnpaused(address indexed marketplace);
 
+    /// @notice Emitted when emergency withdraw is called
+    event EmergencyWithdraw(
+        address indexed marketplace,
+        address indexed token,
+        uint256 tokenId,
+        uint256 amount
+    );
+
+    /// @notice Emitted when emergency stop is toggled
+    event EmergencyStopToggled(address indexed marketplace, bool emergencyStop);
+
     /// @notice Initializes the contract with an admin address
     /// @dev Grants roles to admin
     /// @param admin Address to be granted admin privileges
@@ -59,9 +70,9 @@ contract MarketplaceController is AccessControl {
     ) external onlyRole(MARKETPLACE_CONTROLLER_ROLE) {
         require(marketplace_ != address(0), "Invalid marketplace address");
         require(newRecipient_ != address(0), "Invalid recipient address");
+        emit FeeRecipientUpdated(marketplace_, newRecipient_);
 
         IMarketplace(marketplace_).setFeeRecipient(newRecipient_);
-        emit FeeRecipientUpdated(marketplace_, newRecipient_);
     }
 
     /// @notice Updates the protocol fee for a marketplace
@@ -74,9 +85,9 @@ contract MarketplaceController is AccessControl {
     ) external onlyRole(MARKETPLACE_CONTROLLER_ROLE) {
         require(marketplace_ != address(0), "Invalid marketplace address");
         require(newFee_ <= 10000, "Fee exceeds maximum"); // Max 100%
+        emit ProtocolFeeUpdated(marketplace_, newFee_);
 
         IMarketplace(marketplace_).setProtocolFee(newFee_);
-        emit ProtocolFeeUpdated(marketplace_, newFee_);
     }
 
     /// @notice Sets whether a token is accepted in a marketplace
@@ -91,9 +102,30 @@ contract MarketplaceController is AccessControl {
     ) external onlyRole(MARKETPLACE_CONTROLLER_ROLE) {
         require(marketplace_ != address(0), "Invalid marketplace address");
         require(token_ != address(0), "Invalid token address");
+        emit TokenAcceptanceUpdated(marketplace_, token_, accepted_);
 
         IMarketplace(marketplace_).setAcceptedToken(token_, accepted_);
-        emit TokenAcceptanceUpdated(marketplace_, token_, accepted_);
+    }
+
+    function emergencyWithdraw(
+        address marketplace_,
+        address token_,
+        uint256 tokenId_,
+        uint256 amount,
+        address admin
+    ) external onlyRole(PAUSE_CONTROLLER_ROLE) {
+        require(marketplace_ != address(0), "Invalid marketplace address");
+        require(token_ != address(0), "Invalid token address");
+        require(tokenId_ != 0, "Invalid tokenId");
+        require(amount > 0, "Invalid amount");
+
+        emit EmergencyWithdraw(marketplace_, token_, tokenId_, amount);
+        IMarketplace(marketplace_).emergencyWithdraw(
+            token_,
+            tokenId_,
+            amount,
+            admin
+        );
     }
 
     /// @notice Pauses a marketplace's operations
@@ -103,9 +135,8 @@ contract MarketplaceController is AccessControl {
         address marketplace_
     ) external onlyRole(PAUSE_CONTROLLER_ROLE) {
         require(marketplace_ != address(0), "Invalid marketplace address");
-
-        IMarketplace(marketplace_).pause();
         emit MarketplacePaused(marketplace_);
+        IMarketplace(marketplace_).pause();
     }
 
     /// @notice Unpauses a marketplace's operations
@@ -115,8 +146,7 @@ contract MarketplaceController is AccessControl {
         address marketplace_
     ) external onlyRole(PAUSE_CONTROLLER_ROLE) {
         require(marketplace_ != address(0), "Invalid marketplace address");
-
-        IMarketplace(marketplace_).unpause();
         emit MarketplaceUnpaused(marketplace_);
+        IMarketplace(marketplace_).unpause();
     }
 }

@@ -11,8 +11,9 @@ import {IModule} from "../interfaces/IModule.sol";
 import {SPModule} from "../modules/SPModule.sol";
 import {ContractData} from "../interfaces/IContractStorage.sol";
 import {MomintVault} from "../vault/MomintVault.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract VaultController is AccessControl {
+contract VaultController is AccessControl, ReentrancyGuard {
     bytes32 public constant VAULT_CONTROLLER_ROLE =
         keccak256("VAULT_CONTROLLER");
 
@@ -45,6 +46,11 @@ contract VaultController is AccessControl {
     error DeploymentFailed();
     error InvalidImplementation();
     error ContractNotFound();
+    error InvalidFees();
+    error InvalidPricePerShare();
+    error InvalidTotalShares();
+    error InvalidURI();
+    error InvalidFeeValue();
 
     constructor(address admin) {
         if (admin == address(0)) revert UnauthorizedCaller();
@@ -86,7 +92,20 @@ contract VaultController is AccessControl {
         address feeRecipient,
         VaultFees memory fees,
         bool useClone
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) returns (address newVault) {
+    )
+        external
+        nonReentrant
+        onlyRole(VAULT_CONTROLLER_ROLE)
+        returns (address newVault)
+    {
+        if (asset == address(0)) revert InvalidAddress();
+        if (feeRecipient == address(0)) revert InvalidAddress();
+        if (admin == address(0)) revert InvalidAddress();
+        if (
+            fees.depositFee > 10000 || // Max 100%
+            fees.withdrawalFee > 10000 || // Max 100%
+            fees.protocolFee > 10000 // Max 100%
+        ) revert InvalidFeeValue();
         ContractData memory implData = contractStorage.getContract(
             implementationId
         );
@@ -136,82 +155,54 @@ contract VaultController is AccessControl {
         return newVault;
     }
 
+    // Create a struct to hold deployment parameters
+    struct ModuleDeploymentParams {
+        address vault;
+        address owner;
+        string name;
+        uint256 pricePerShare;
+        uint256 totalShares;
+        string uri;
+        bool isClone;
+        bytes32 salt;
+        bytes32 moduleImplementationId;
+    }
+
     function deployAndAddModule(
         address vault,
-        address admin,
-        string calldata projectName,
+        address owner,
+        string memory name,
         uint256 pricePerShare,
         uint256 totalShares,
-        string calldata uri,
-        bool useClone,
-        bytes32 moduleImplementationId // Add implementation ID parameter
-    ) external onlyRole(VAULT_CONTROLLER_ROLE) returns (address moduleAddress) {
-        ContractData memory moduleImpl = contractStorage.getContract(
-            moduleImplementationId
-        );
-        if (moduleImpl.contractAddress == address(0))
-            revert InvalidImplementation();
+        string memory uri,
+        bool isClone,
+        bytes32 salt,
+        bytes32 moduleImplementationId
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) returns (address) {
+        if (vault == address(0)) revert InvalidAddress();
+        if (owner == address(0)) revert InvalidAddress();
+        if (pricePerShare == 0) revert InvalidPricePerShare();
+        if (totalShares == 0) revert InvalidTotalShares();
+        if (bytes(uri).length == 0) revert InvalidURI();
 
-        uint256 nextProjectId = moduleStorage.currentProjectId() + 1;
-
-        bytes memory constructorArgs = abi.encode(
-            nextProjectId,
-            admin,
-            vault,
-            projectName,
-            pricePerShare,
-            totalShares,
-            uri
-        );
-
-        bytes32 salt = keccak256(
-            abi.encodePacked(projectName, block.timestamp, nextProjectId)
-        );
-
-        MomintFactory.DeployConfig memory config = MomintFactory.DeployConfig({
-            implementation: moduleImpl.contractAddress,
-            initData: constructorArgs,
+        ModuleDeploymentParams memory params = ModuleDeploymentParams({
+            vault: vault,
+            owner: owner,
+            name: name,
+            pricePerShare: pricePerShare,
+            totalShares: totalShares,
+            uri: uri,
+            isClone: isClone,
             salt: salt,
-            deployType: useClone
-                ? MomintFactory.DeploymentType.CLONE
-                : MomintFactory.DeploymentType.DIRECT,
-            creationCode: useClone ? bytes("") : type(SPModule).creationCode
+            moduleImplementationId: moduleImplementationId
         });
 
-        try factory.deploy(config) returns (address module) {
-            moduleAddress = module;
-        } catch {
-            revert DeploymentFailed();
-        }
-
-        // Store module information
-        moduleStorage.storeModule(moduleAddress, projectName, vault);
-
-        // Store contract information
-        bytes32 moduleId = keccak256(abi.encodePacked("MODULE", moduleAddress));
-        contractStorage.addContract(
-            moduleId,
-            ContractData({
-                contractAddress: moduleAddress,
-                initDataRequired: false
-            })
-        );
-
-        // Add module to vault
-        Module memory newModule = Module({
-            module: IModule(moduleAddress),
-            isSingleProject: true,
-            active: true
-        });
-        IMomintVault(vault).addModule(newModule, false, 0);
-
-        emit ModuleDeployed(moduleAddress, vault, projectName, useClone);
-        return moduleAddress;
+        return _deployAndAddModule(params);
     }
 
     function getVaultInfo(
         address vault
-    ) external view returns (VaultStorage.VaultInfo memory) {
+    ) public view returns (VaultStorage.VaultInfo memory) {
         return vaultStorage.getVault(vault);
     }
 
@@ -223,7 +214,57 @@ contract VaultController is AccessControl {
 
     function getContractInfo(
         bytes32 id
-    ) external view returns (ContractData memory) {
+    ) public view returns (ContractData memory) {
         return contractStorage.getContract(id);
     }
+
+    function _deployAndAddModule(
+        ModuleDeploymentParams memory params
+    ) internal returns (address) {
+        VaultStorage.VaultInfo memory vaultInfo = getVaultInfo(params.vault);
+        if (vaultInfo.vaultAddress == address(0)) {
+            revert ContractNotFound();
+        }
+        ContractData memory moduleImpl = getContractInfo(
+            params.moduleImplementationId
+        );
+        if (moduleImpl.contractAddress == address(0)) {
+            revert InvalidImplementation();
+        }
+        bytes memory constructorArgs = abi.encode(
+            params.vault,
+            params.owner,
+            params.name,
+            params.pricePerShare,
+            params.totalShares,
+            params.uri,
+            params.owner
+        );
+        MomintFactory.DeployConfig memory config;
+        address module;
+        if (params.isClone) {
+            config = MomintFactory.DeployConfig({
+                implementation: moduleImpl.contractAddress,
+                initData: constructorArgs,
+                salt: params.salt,
+                deployType: MomintFactory.DeploymentType.CLONE,
+                creationCode: ""
+            });
+        } else {
+            config = MomintFactory.DeployConfig({
+                implementation: moduleImpl.contractAddress,
+                initData: constructorArgs,
+                salt: params.salt,
+                deployType: MomintFactory.DeploymentType.DIRECT,
+                creationCode: type(SPModule).creationCode
+            });
+        }
+        module = factory.deploy(config);
+        if (module == address(0)) {
+            revert DeploymentFailed();
+        }
+        moduleStorage.storeModule(module, params.name,params.vault);
+        emit ModuleDeployed(module, params.vault, params.name, params.isClone);
+        return module;
+    } 
 }

@@ -3,6 +3,7 @@ src = "src"
 out = "out"
   names = true
 sizes = true
+optimizer = true
 optimizer_runs = 999999
 max_test_rejects = 99999
 libs = ["lib"]
