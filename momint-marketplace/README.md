@@ -485,8 +485,35 @@ function deposit(
     ) external
 ```
 
-This function takes the assets and a specific project index. This means that when index 1 is passed all calculations will be handled on that project. The deposit function will first go and calculate all the fee's and automatically send them to where they should be distrubuted to. After this the function will grab a the contract address at the index that was passed. This contract that the function is grabbing is a module address which again is a project. We will call the invest function inside of the module note this is also part of the module standard. The invest function will go to the module and the module itself will have its own calculations on how an investment works and how many shares should be giving to the user and if there needs to be any assets refunded. After the module sends back the calulation of share amounts we then will mint that amount back to the user. Note inside the system we follow a 1:1 approach meaning you need to buy at whole. There will not be 0.5 share it has to be 1 share minimum.
+This function accepts the share amount and a specific project index. When a user provides an index (e.g., index 1), all calculations and operations will be applied to that particular project.
 
+Fee Calculation & Distribution:
+
+The function first calculates all applicable fees.
+Fees are automatically deducted and sent to their respective destinations.
+
+Retrieving the Project Module:
+
+The function retrieves the contract address associated with the given project index from storage.
+This contract corresponds to a module, which represents the project.
+
+Calling the Investment Function:
+
+The function then calls the invest function on the module.
+
+Each module follows a standardized structure and containing its own logic for handling investments.
+
+Processing Shares & Refunds:
+
+The module determines how the investment should be processed.
+It calculates the number of shares to allocate to the user.
+If necessary, it also calculates any refunds.
+
+Minting Shares:
+Once the module returns the calculated share amount, the vault mints the shares and the module updates the state and assigns the shares to the user.
+
+Automated Liquidity Partitions:
+The liquidity generated from a sale will be automatically allocated to the appropriate destinations.
 
 **Withdraw**
 When a user wants to get their underlying assets back they will use the following function 
