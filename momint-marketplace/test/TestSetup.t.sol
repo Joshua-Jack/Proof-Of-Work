@@ -10,7 +10,7 @@ import "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.so
 import "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 import {Global} from "./Global.t.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
-import {InitParams} from "../src/interfaces/IMomintVault.sol";
+import {VaultInfo} from "../src/interfaces/IMomintVault.sol";
 
 contract TestSetup is Test, Global {
     MomintVault vault;
@@ -44,7 +44,7 @@ contract TestSetup is Test, Global {
         implementation = address(new MomintVault());
         vaultAddress = Clones.clone(implementation);
         vault = MomintVault(vaultAddress);
-        InitParams memory params = InitParams({
+        VaultInfo memory params = VaultInfo({
             baseAsset: USDT,
             symbol: "MV",
             shareName: "Momint Vault",
@@ -88,7 +88,7 @@ contract TestSetup is Test, Global {
             5e6,
             100,
             "ipfs://metadata",
-            user3
+            admin_
         );
         spModuleAddress = address(spModule);
         return

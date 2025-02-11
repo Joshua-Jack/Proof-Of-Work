@@ -12,7 +12,7 @@ import {SPModule} from "../../src/modules/SPModule.sol";
 import {console} from "forge-std/console.sol";
 import "forge-std/StdStyle.sol";
 import {Styles} from "../utils/Styles.sol";
-import {InitParams} from "../../src/interfaces/IMomintVault.sol";
+import {VaultInfo} from "../../src/interfaces/IMomintVault.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {stdError} from "forge-std/Test.sol";
 
@@ -37,6 +37,7 @@ contract MomintVaultTests is TestSetup {
     error AlreadyClaimed();
     error InvalidEpochId();
     error InvalidModuleAddress();
+    error Unauthorized();
 
     event SharesAllocated(
         address indexed user,
@@ -526,6 +527,49 @@ contract MomintVaultTests is TestSetup {
         console.log("=== claimReturns test complete ===\n");
     }
 
+    function test_UpdatePricePerShare() public {
+        // Setup
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+
+        // Initial price check
+        uint256 initialPrice = SPModule(address(singleProjectModule.module))
+            .getProjectInfo()
+            .pricePerShare;
+
+        // Update price
+        uint256 newPrice = 100e6;
+        SPModule(address(singleProjectModule.module)).updatePricePerShare(
+            newPrice
+        );
+
+        // Verify price update
+        uint256 updatedPrice = SPModule(address(singleProjectModule.module))
+            .getProjectInfo()
+            .pricePerShare;
+        assertEq(updatedPrice, newPrice, "Price not updated correctly");
+        assertNotEq(updatedPrice, initialPrice, "Price should have changed");
+
+        vm.stopPrank();
+    }
+
+    function test_RevertUpdatePricePerShare_NonOwner() public {
+        // Setup
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        // Try to update price as non-owner
+        vm.startPrank(user1);
+        vm.expectRevert(SPModule.Unauthorized.selector);
+        SPModule(address(singleProjectModule.module)).updatePricePerShare(
+            100e6
+        );
+        vm.stopPrank();
+    }
+
     function test_addProjectModule() public {
         vm.startPrank(admin);
 
@@ -612,9 +656,9 @@ contract MomintVaultTests is TestSetup {
         return MomintVault(vaultNewAddress);
     }
 
-    function _getDefaultInitParams() internal view returns (InitParams memory) {
+    function _getDefaultInitParams() internal view returns (VaultInfo memory) {
         return
-            InitParams({
+            VaultInfo({
                 baseAsset: USDT,
                 feeRecipient: feeRecipient,
                 owner: admin,
@@ -632,7 +676,7 @@ contract MomintVaultTests is TestSetup {
 
     function test_RevertWhen_InitializeWithZeroAsset() public {
         MomintVault newVault = _deployNewVault();
-        InitParams memory params = _getDefaultInitParams();
+        VaultInfo memory params = _getDefaultInitParams();
         params.baseAsset = IERC20(address(0));
 
         vm.expectRevert(InvalidAssetAddress.selector);
@@ -641,7 +685,7 @@ contract MomintVaultTests is TestSetup {
 
     function test_RevertWhen_InitializeWithZeroFeeRecipient() public {
         MomintVault newVault = _deployNewVault();
-        InitParams memory params = _getDefaultInitParams();
+        VaultInfo memory params = _getDefaultInitParams();
         params.feeRecipient = address(0);
 
         vm.expectRevert(InvalidFeeRecipient.selector);
@@ -650,7 +694,7 @@ contract MomintVaultTests is TestSetup {
 
     function test_RevertWhen_InitializeWithLowLiquidityRatio() public {
         MomintVault newVault = _deployNewVault();
-        InitParams memory params = _getDefaultInitParams();
+        VaultInfo memory params = _getDefaultInitParams();
         params.liquidityHoldBP = 500; // Below minimum
 
         vm.expectRevert("Liquidity ratio too low");
@@ -659,7 +703,7 @@ contract MomintVaultTests is TestSetup {
 
     function test_RevertWhen_InitializeWithHighOwnerShare() public {
         MomintVault newVault = _deployNewVault();
-        InitParams memory params = _getDefaultInitParams();
+        VaultInfo memory params = _getDefaultInitParams();
         params.maxOwnerShareBP = 9500; // Above maximum
 
         vm.expectRevert("Owner share too high");
@@ -668,7 +712,7 @@ contract MomintVaultTests is TestSetup {
 
     function test_RevertWhen_ReinitializingVault() public {
         MomintVault newVault = _deployNewVault();
-        InitParams memory params = _getDefaultInitParams();
+        VaultInfo memory params = _getDefaultInitParams();
 
         // First initialization
         newVault.initialize(params);
@@ -680,7 +724,7 @@ contract MomintVaultTests is TestSetup {
 
     function test_RevertWhen_InitializeWithInvalidRatioConfig() public {
         MomintVault newVault = _deployNewVault();
-        InitParams memory params = _getDefaultInitParams();
+        VaultInfo memory params = _getDefaultInitParams();
         params.liquidityHoldBP = 5000;
         params.maxOwnerShareBP = 6000;
         // Total exceeds MAX_BASIS_POINTS (10000)

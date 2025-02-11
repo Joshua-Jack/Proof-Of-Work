@@ -12,13 +12,12 @@ import {SPModule} from "../../src/modules/SPModule.sol";
 import {VaultFees} from "../../src/interfaces/IMomintVault.sol";
 import {ContractData} from "../../src/interfaces/IContractStorage.sol";
 import {MockERC20} from "../../test/mocks/MockERC20.sol";
-import {InitParams} from "../../src/vault/MomintVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Module} from "../../src/interfaces/IMomintVault.sol";
 import {IModule} from "../../src/interfaces/IModule.sol";
 import {MomintVault} from "../../src/vault/MomintVault.sol";
-import {InitParams} from "../../src/interfaces/IMomintVault.sol";
+import {VaultInfo} from "../../src/interfaces/IMomintVault.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 
 contract VaultControllerTest is Test {
@@ -92,7 +91,7 @@ contract VaultControllerTest is Test {
         // Deploy and initialize vault implementation
         vaultImplementation = Clones.clone(address(new MomintVault()));
         vault = MomintVault(vaultImplementation);
-        InitParams memory params = InitParams({
+        VaultInfo memory params = VaultInfo({
             baseAsset: USDT,
             symbol: "MV",
             shareName: "Momint Vault",
@@ -468,7 +467,7 @@ contract VaultControllerTest is Test {
         return
             abi.encodeWithSelector(
                 MomintVault.initialize.selector,
-                InitParams({
+                VaultInfo({
                     baseAsset: IERC20(address(asset)),
                     symbol: "MV",
                     shareName: "Test Vault",

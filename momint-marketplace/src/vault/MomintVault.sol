@@ -9,7 +9,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IModule} from "../interfaces/IModule.sol";
 import {VaultHelper} from "../libraries/VaultHelper.sol";
-import {IMomintVault, Module, VaultFees, OwnerAllocation, Epoch, InitParams} from "../interfaces/IMomintVault.sol";
+import {IMomintVault, Module, VaultFees, OwnerAllocation, Epoch, VaultInfo} from "../interfaces/IMomintVault.sol";
 import {MAX_BASIS_POINTS} from "../utils/Constants.sol";
 import {console} from "forge-std/console.sol";
 
@@ -114,14 +114,14 @@ contract MomintVault is
 
     // ============ Initialization & Core Functions ============
     function initialize(
-        InitParams calldata params
+        VaultInfo calldata params
     ) external initializer nonReentrant {
         _validateInitParams(params);
         _initializeCore(params);
         emit Initialized(address(this), address(params.baseAsset));
     }
 
-    function _validateInitParams(InitParams calldata params) internal pure {
+    function _validateInitParams(VaultInfo calldata params) internal pure {
         if (address(params.baseAsset) == address(0))
             revert InvalidAssetAddress();
         if (params.feeRecipient == address(0)) revert InvalidFeeRecipient();
@@ -140,7 +140,7 @@ contract MomintVault is
         );
     }
 
-    function _initializeCore(InitParams calldata params) internal {
+    function _initializeCore(VaultInfo calldata params) internal {
         __ERC4626_init(params.baseAsset);
         __Ownable_init(params.owner);
         __ERC20_init(params.shareName, params.symbol);
@@ -584,6 +584,20 @@ contract MomintVault is
     {
         Epoch storage epoch = epochs[epochId];
         return (epoch.id, epoch.amount, epoch.pendingRewards);
+    }
+
+    function getVaultInfo() external view returns (VaultInfo memory) {
+        return
+            VaultInfo({
+                baseAsset: IERC20(asset()),
+                symbol: symbol(),
+                shareName: name(),
+                owner: owner(),
+                feeRecipient: feeRecipient,
+                fees: fees,
+                liquidityHoldBP: minLiquidityHoldBP,
+                maxOwnerShareBP: maxOwnerShareBP
+            });
     }
 
     // ============ Internal Functions ============

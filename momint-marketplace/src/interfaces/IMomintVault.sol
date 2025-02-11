@@ -18,7 +18,7 @@ struct VaultFees {
     uint64 protocolFee;
 }
 
-struct InitParams {
+struct VaultInfo {
     IERC20 baseAsset;
     string symbol;
     string shareName;

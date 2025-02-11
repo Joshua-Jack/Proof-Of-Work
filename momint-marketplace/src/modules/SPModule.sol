@@ -63,9 +63,27 @@ contract SPModule is
         uint256 indexed projectId,
         uint256 amount
     );
+    event PricePerShareUpdated(
+        uint256 indexed projectId,
+        uint256 pricePerShare,
+        uint256 oldPricePerShare
+    );
+
+    enum UpdateType {
+        NAME,
+        PRICE_PER_SHARE,
+        TOTAL_SHARES,
+        URI,
+        OWNER
+    }
 
     modifier onlyVault() {
         if (msg.sender != vaults) revert Unauthorized();
+        _;
+    }
+
+    modifier onlyOwner() {
+        if (msg.sender != _project.owner) revert Unauthorized();
         _;
     }
 
@@ -155,7 +173,7 @@ contract SPModule is
     function divest(
         uint256 shares,
         address user
-    ) external nonReentrant returns (uint256 amount) {
+    ) external onlyVault nonReentrant returns (uint256 amount) {
         if (msg.sender != vaults) revert NotVault();
         if (!_project.active) revert ProjectInactive();
 
@@ -168,7 +186,10 @@ contract SPModule is
         return amount;
     }
 
-    function distributeRevenue(uint256 projectId, uint256 amount) external {
+    function distributeRevenue(
+        uint256 projectId,
+        uint256 amount
+    ) external onlyVault {
         if (projectId != _projectId) revert InvalidProjectId();
         if (amount == 0) revert InvalidAmount();
         if (_project.allocatedShares == 0) revert InsufficientShares();
@@ -179,6 +200,26 @@ contract SPModule is
         );
         _updateRevenueState(amount, newRevenuePerShare);
         emit RevenueDistributed(projectId, amount, newRevenuePerShare);
+    }
+
+    function updatePricePerShare(uint256 pricePerShare) external onlyOwner {
+        ProjectInfo memory project = getProjectInfo();
+        emit PricePerShareUpdated(
+            project.id,
+            pricePerShare,
+            project.pricePerShare
+        );
+        _project = ProjectInfo({
+            id: project.id,
+            name: project.name,
+            pricePerShare: pricePerShare,
+            availableShares: project.totalShares,
+            allocatedShares: project.allocatedShares,
+            totalShares: project.totalShares,
+            active: project.active,
+            tokenURI: project.tokenURI,
+            owner: project.owner
+        });
     }
 
     // === View functions ===
@@ -199,7 +240,7 @@ contract SPModule is
         return vaults;
     }
 
-    function getProjectInfo() external view returns (ProjectInfo memory) {
+    function getProjectInfo() public view returns (ProjectInfo memory) {
         return _project;
     }
 
