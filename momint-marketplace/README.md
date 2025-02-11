@@ -329,7 +329,7 @@ To cancel the listing of an RWA that is currently listed, the following function
 ```
 The batch minting process mirrors the same process of purchasing from a single listing, with the main difference being that the system will handle multiple real-world assets (RWAs) the user intends to buy. All associated fees and royalties will be distributed as intended.
 
-## **The Momint Vault System** 
+## The Momint Vault System 
 The Momint Vault System is designed to standardize the investment process for users looking to acquire RWAs (Real-World Assets). The system consists of the following key components:
 
 - Vault Controller
@@ -337,13 +337,13 @@ The Momint Vault System is designed to standardize the investment process for us
 - Modules
 
 
-**Vault Controller**
+### Vault Controller
 The Vault Controller is responsible for managing accounting, handling emergency scenarios, and deploying/storing modules, vaults, and new contracts within the system. Further the vault manages a multi-fee structure that covers various operational aspects.
 
-## Emergency Functions
+### Emergency Functions
 The Vault Controller has the ability to pause and unpause a single vault or all deployed vaults. Additionally, it can withdraw liquidity from a single vault or all vaults in case of emergencies.
 
-## Deployment of Modules, Vaults, and Contracts
+### Deployment of Modules, Vaults, and Contracts
 When deploying vaults and modules inside the Vault Controller follows these steps:
 
 - Contract Deployment: First, a contract is deployed, which can be either a module or a vault.
@@ -367,7 +367,7 @@ function addModule(address vault_, uint256 index_, bytes32 moduleId_)
 
 
 
-## Vault Info 
+### Vault Info 
 - baseAsset: The underlying liquidity token (e.g., USDC).
 - symbol: The token symbol for the vault shares (e.g., $SL).
 - shareName: The full name of the vault share token (e.g., $SOLAR).
@@ -377,7 +377,13 @@ function addModule(address vault_, uint256 index_, bytes32 moduleId_)
 - liquidityHoldBP - Determines the percentage of deposits held as liquid reserves in the vault (measured in basis points).
 - maxOwnerShareBP - Defines the maximum percentage of funds that can be allocated to project owners (measured in basis points).
 
-## Project Info 
+To retrive this information we call the following function inside the module  
+
+```solidity 
+function getVaultInfo();
+```
+
+### Project Info 
 Each module created will have its own distinct project details. 
 
 - id - The token ID of the projects real world assets
@@ -394,8 +400,6 @@ To retrive this information we call the following function inside the module
 ```solidity
 function getProjectInfo 
 ```
-
-
 
 ### **Fee Types**
 
@@ -417,36 +421,7 @@ function getProjectInfo
    - **Applied to returns**  
    - **Adjustable by governance**  
 
- 
-Note each module and vault will have their own information attached to it. What this means is that when a vault is deployed we set the name of the vault and its new vault tokens name and symbol inside of a vault struct. We can simply get this information by call the function 
-
-```solidity 
-function getVaultInfo();
-```
-
-The same will go for every module that is deployed all modules will follow a standard and part of that standard is that we know what the module is. The information we set for our current module we have is the following. 
-
-```solidity
-struct ProjectInfo {
-        uint256 id;
-        string name;
-        uint256 pricePerShare;
-        uint256 availableShares;
-        uint256 allocatedShares;
-        uint256 totalShares;
-        bool active;
-        string tokenURI;
-        address owner;
-    }
-```
-
-We can again simply get this information by calling the following function 
-
-```solidity
-function getProjectInfo 
-```
-
-**Momint Vault**
+### Momint Vault
 The momint vault is an erc4626 vault designed to handle erc20 managment for users and project owners. This vault gives users the following abilities: 
 
 - Deposit
@@ -525,7 +500,31 @@ When a user wants to get their underlying assets back they will use the followin
     ) external
 ```
 
-This function takes the shares they want to burn and the specific project index. This function will follow the same method of grabing the address from the index as per the deposit function. The withdraw function will check all common check exmaple balance of the user to ensure they have shares. Now we will be calling the divest function inside of the module and again this is also part of the module standard. The divest function will go to the module and the module itself will handle all divestments calculations so when we get the amount back we can perform the proper calculations inside the vault. We will be checking to ensure we have enough liqudity inside the vault to ensure we can make the withdraw if there is no liqudity the user will have to come back when liqudity is available. After we made this check we move onto burning of the shares and transfering the underlying assets back to the user. 
+This function allows users to burn their shares from a project and withdraw their underlying vault liquidty token.
+
+Retrieving the Project Module:
+
+The function takes the number of shares the user wants to burn and the project index.
+It retrieves the corresponding contract address for the project, just as in the deposit function.
+
+Validation Checks:
+The function verifies that the user has enough shares to withdraw this is checking the module.
+
+Calling the Divest Function:
+The function calls the divest function on the module.
+Each module follows a standardized structure and manages its own divestment calculations.
+
+Processing the Withdrawal:
+The module determines the amount of underlying liqudity tokens to return.
+Once the vault receives this information, it performs the final calculations.
+
+Liquidity Check:
+The vault ensures that there is enough available liquidity to process the withdrawal.
+If there isn’t sufficient liquidity, the user must wait until more funds become available.
+
+Finalizing the Transaction:
+If liquidity is available, the function burns the user’s shares.
+The corresponding amount of the underlying liquity token is then transferred back to the user.
 
 **Shares Explination**
 In the system, each project is allocated a specific number of shares on creation of their project. For example, if a project is assigned 100 shares, only those 100 share tokens can be sold. When a user invests in that project, they can acquire up to the available 100 shares. This structure renders the total number of shares in the vault irrelevant because, although the vault may contain 300 minted shares, these shares must originate from a project. Therefore, a user can only obtain shares after a project's allocation has been determined.
@@ -541,7 +540,21 @@ function distributeReturns(
     ) external
 ```
 
-This function will first go to the project and get the needed accounting functions. These function will be utilized inside the vault to calculate the distrubution and ensure we follow the 1:1 buy at whole. After this we will create a returns epoch. The epochs are created to ensure fair distribution of returns based on when users held shares, tracks and manage distributions in a organized way, represents a distinct period of returns/revenue distribution. Once the epoch is created users are able to claim on the epoch. The users will use the following function to claim their returns. 
+This function ensures that investment returns are fairly distributed based on share ownership during a specific period.
+
+Retrieving Project Accounting Data:
+
+The function first retrieves the necessary accounting details from the project.
+This data is used inside the vault to calculate distributions while ensuring adherence to the 1:1 whole-share model (only whole shares can be bought or sold).
+Creating a Returns Epoch:
+
+A returns epoch is established to manage and track revenue distribution.
+The epoch ensures fair distribution based on when users held shares.
+It organizes distributions into distinct time periods for structured revenue allocation.
+Claiming Returns:
+
+Once an epoch is created, users become eligible to claim their share of the returns.
+To do so, they use the designated claim function, which verifies eligibility before distributing funds.
 
 ```solidity
  function claimReturns(
@@ -550,7 +563,19 @@ This function will first go to the project and get the needed accounting functio
     ) external
 ```
 
-This function will take the epoch id in which the user wants to claim from and the project in which the epoch belongs to. From here the function will check to ensure that the user hasnt already claimed from this epoch, holds shares inside the project and ensures it follows our dust controll. Once the checks pass the user will receive the underlying asset in the vault as their reward. 
+This function allows users to claim their share of returns from a specific project and epoch.
+
+Selecting the Epoch and Project:
+
+The function takes the epoch ID (the specific distribution period) and the project it belongs to.
+Validation Checks:
+
+Ensures the user has not already claimed from the selected epoch.
+Verifies that the user holds shares in the project.
+Applies dust control measures to prevent insignificant or unnecessary claims.
+Reward Distribution:
+
+If all checks pass, the function releases the user's share of the underlying asset stored in the vault.
 
 **Project Owner Allocation** 
 The vault is designed to autonomously manage its liquidity through multiple channels. One of these channels are deposits. When users deposit funds, these assets increase the vault's liquidity. Now when the vault gets this liqudity it will be partitioned. X percent to the vaults liqudity and X percent allocated to the project owner. Now project owners can claim their sales from the following function. 
