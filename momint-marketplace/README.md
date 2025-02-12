@@ -459,8 +459,11 @@ function deposit(
         uint256 index_
     ) external
 ```
+The deposit function takes the following parameters:
+assets: The quantity of the underlying liquidity token that the user wants to deposit.
+index: The identifier for the specific project where the deposit should be allocated.
 
-This function accepts the share amount and a specific project index. When a user provides an index (e.g., index 1), all calculations and operations will be applied to that particular project.
+When a user provides an index (e.g., index 1), all calculations and operations will be applied to that particular project.
 
 Fee Calculation & Distribution:
 
