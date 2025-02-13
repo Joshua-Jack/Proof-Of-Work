@@ -1,5 +1,8 @@
 ## Foundry
 
+
+
+
 **Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
 
 Foundry consists of:
@@ -494,6 +497,8 @@ Automated Liquidity Partitions:
 The liquidity generated from a sale will be automatically allocated to the appropriate destinations.
 
 **Withdraw**
+![WithMomint](https://github.com/user-attachments/assets/584d11d7-bea6-4f50-9555-9e57a4c58198)
+
 When a user wants to get their underlying assets back they will use the following function 
 
 ```solidity
@@ -534,6 +539,7 @@ In the system, each project is allocated a specific number of shares on creation
 
 
 **Distribute and Claim**
+![DistrubuteAndClaimMomint](https://github.com/user-attachments/assets/c6f8fb15-fcef-4acf-b627-32f5dfad1034)
 The distribution system manages how investment returns are distributed to projects through a structured epoch-based mechanism. When an project owner wants to distrubute returns to their share holders they will use the following function 
 
 ```solidity
