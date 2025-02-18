@@ -1,5 +1,8 @@
 ## Foundry
 
+
+
+
 **Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
 
 Foundry consists of:
@@ -329,7 +332,7 @@ To cancel the listing of an RWA that is currently listed, the following function
 ```
 The batch minting process mirrors the same process of purchasing from a single listing, with the main difference being that the system will handle multiple real-world assets (RWAs) the user intends to buy. All associated fees and royalties will be distributed as intended.
 
-## **The Momint Vault System** 
+## The Momint Vault System 
 The Momint Vault System is designed to standardize the investment process for users looking to acquire RWAs (Real-World Assets). The system consists of the following key components:
 
 - Vault Controller
@@ -337,76 +340,91 @@ The Momint Vault System is designed to standardize the investment process for us
 - Modules
 
 
-**Vault Controller**
+### Vault Controller
 The Vault Controller is responsible for managing accounting, handling emergency scenarios, and deploying/storing modules, vaults, and new contracts within the system. Further the vault manages a multi-fee structure that covers various operational aspects.
 
-### Fee Types
+### Emergency Functions
+The Vault Controller has the ability to pause and unpause a single vault or all deployed vaults. Additionally, it can withdraw liquidity from a single vault or all vaults in case of emergencies.
 
- **1.Deposit Fee**
-    - Charged on deposit
-    - Default: 5% (500 basis points)
-    - Calculation: `depositAmount * (depositFee / 10000)`
-    - Adjustable by governance
- **2.Withdrawal Fee**
-    - Charged on withdrawal
-    - Default: 1% (100 basis points)
-    - Calculation: `withdrawAmount * (withdrawalFee / 10000)`
-    - Adjustable by governance
- **3.Protocol Fee**
-    - Platform operation fee
-    - Default: 3% (300 basis points)
-    - Applied to returns
-    - Adjustable by governance
+### Deployment of Modules, Vaults, and Contracts
+When deploying vaults and modules inside the Vault Controller follows these steps:
 
-The emergency functions the controller has access it is the ability to pause and unpause a single vault or all vaults deployed. Further this contract has the ability to withdraw the liqudity in a single vault or in all vaults deployed. 
+- Contract Deployment: First, a contract is deployed, which can be either a module or a vault.
+- Storage: The deployed contract is stored inside the contract storage. This allows multiple versions of vaults and modules to be stored for later deployment.
+- Cloning: Instead of deploying a new contract every time, stored contracts can be cloned for reuse. Example: If an ERC-1155 module is deployed and stored, it can be cloned and used for multiple projects.
 
-The deploying of modules, vaults and contracts. The vault controller when it comes to deployment of vaults and modules works as the following. First we will deploy a contract this contract can be either a module or a vault. This will get stored inside the contract storage. The contract storage allows us to put as many vault versions and module versions we would like so we can use them for deployment. Once we have the contracts inside the contract storage we can then move to deployment of a module or a vault. Note the reason we will deploy a contract first and store it is so that we can create once and clone as many times as we like. Example of this we have currently an ERC1155 module and this module is used specifically for projects now once we deploy that and its stored we can clone it for as many projects as we want. Now moving on to deploying a new vault and adding a module. The contract storage contract will use a unique identifier when a contract is store we will use the following function with the same unique id that we used to store the contract to get the contract address and clone it. 
-
+To deploy a vault, the following function is used:
 ```solidity
 function deployVault(bytes32 id_, bytes calldata data_) external; 
 ```
-
-We will follow this same pattern with the modules. 
-
+To deploy a module, the following function is used:
 ```soldity
 function deployModule(bytes32 id_, bytes calldata data_) external;
 ```
 
-Now once we have our vault and module deployed we can call the final function which is to add the module to the vault. 
+Once a vault and module are deployed, the final step is to link them using:
 
 ```solidity
 function addModule(address vault_, uint256 index_, bytes32 moduleId_)
 ```
 
-Note each module and vault will have their own information attached to it. What this means is that when a vault is deployed we set the name of the vault and its new vault tokens name and symbol inside of a vault struct. We can simply get this information by call the function 
+
+
+### Vault Info 
+- baseAsset: The underlying liquidity token (e.g., USDC).
+- symbol: The token symbol for the vault shares (e.g., $SL).
+- shareName: The full name of the vault share token (e.g., $SOLAR).
+- owner - The vault owner’s address.
+- feeRecipient - The protocol address that will receive transaction fees.
+- fees - A structured fee model, explained below.
+- liquidityHoldBP - Determines the percentage of deposits held as liquid reserves in the vault (measured in basis points).
+- maxOwnerShareBP - Defines the maximum percentage of funds that can be allocated to project owners (measured in basis points).
+
+To retrive this information we call the following function inside the module  
 
 ```solidity 
 function getVaultInfo();
 ```
 
-The same will go for every module that is deployed all modules will follow a standard and part of that standard is that we know what the module is. The information we set for our current module we have is the following. 
+### Project Info 
+Each module created will have its own distinct project details. 
 
-```solidity
-struct ProjectInfo {
-        uint256 id;
-        string name;
-        uint256 pricePerShare;
-        uint256 availableShares;
-        uint256 allocatedShares;
-        uint256 totalShares;
-        bool active;
-        string tokenURI;
-        address owner;
-    }
-```
+- id - The token ID of the projects real world assets
+- name – The name of the project.
+- pricePerShare – The price of one share in the project.
+- availableShares – The number of shares that are still available for purchase.
+- allocatedShares – The number of shares that have already been bought by users.
+- totalShares – The total number of shares minted when the project was created (e.g., if the project represents solar panels, this is the total number of panels).
+- tokenURI – A link to metadata associated with the project
+- owner – The address of the project owner, who has administrative control over the project.
 
-We can again simply get this information by calling the following function 
+To retrive this information we call the following function inside the module  
 
 ```solidity
 function getProjectInfo 
 ```
 
-**Momint Vault**
+### **Fee Types**
+
+1. **Deposit Fee**  
+   - **Charged on deposit**  
+   - **Default:** 5% (500 basis points)  
+   - **Calculation:** `depositAmount * (depositFee / 10000)`  
+   - **Adjustable by governance**  
+
+2. **Withdrawal Fee**  
+   - **Charged on withdrawal**  
+   - **Default:** 1% (100 basis points)  
+   - **Calculation:** `withdrawAmount * (withdrawalFee / 10000)`  
+   - **Adjustable by governance**  
+
+3. **Protocol Fee**  
+   - **Platform operation fee**  
+   - **Default:** 3% (300 basis points)  
+   - **Applied to returns**  
+   - **Adjustable by governance**  
+
+### Momint Vault
 The momint vault is an erc4626 vault designed to handle erc20 managment for users and project owners. This vault gives users the following abilities: 
 
 - Deposit
@@ -433,6 +451,9 @@ Now that we understand the main features we can dive into the main flows of the 
 - Project Owner Allocation 
 
 **Deposit** 
+![MomintDepo](https://github.com/user-attachments/assets/0e6641a5-50c7-47b8-8c81-da3bc7b900ad)
+
+
 When a user deposits inside of the momint vault they will use the following function 
 
 ```solidity 
@@ -441,11 +462,43 @@ function deposit(
         uint256 index_
     ) external
 ```
+The deposit function takes the following parameters:
+assets: The quantity of the underlying liquidity token that the user wants to deposit.
+index: The identifier for the specific project where the deposit should be allocated.
 
-This function takes the assets and a specific project index. This means that when index 1 is passed all calculations will be handled on that project. The deposit function will first go and calculate all the fee's and automatically send them to where they should be distrubuted to. After this the function will grab a the contract address at the index that was passed. This contract that the function is grabbing is a module address which again is a project. We will call the invest function inside of the module note this is also part of the module standard. The invest function will go to the module and the module itself will have its own calculations on how an investment works and how many shares should be giving to the user and if there needs to be any assets refunded. After the module sends back the calulation of share amounts we then will mint that amount back to the user. Note inside the system we follow a 1:1 approach meaning you need to buy at whole. There will not be 0.5 share it has to be 1 share minimum.
+When a user provides an index (e.g., index 1), all calculations and operations will be applied to that particular project.
 
+Fee Calculation & Distribution:
+
+The function first calculates all applicable fees.
+Fees are automatically deducted and sent to their respective destinations.
+
+Retrieving the Project Module:
+
+The function retrieves the contract address associated with the given project index from storage.
+This contract corresponds to a module, which represents the project.
+
+Calling the Investment Function:
+
+The function then calls the invest function on the module.
+
+Each module follows a standardized structure and containing its own logic for handling investments.
+
+Processing Shares & Refunds:
+
+The module determines how the investment should be processed.
+It calculates the number of shares to allocate to the user.
+If necessary, it also calculates any refunds.
+
+Minting Shares:
+Once the module returns the calculated share amount, the vault mints the shares and the module updates the state and assigns the shares to the user.
+
+Automated Liquidity Partitions:
+The liquidity generated from a sale will be automatically allocated to the appropriate destinations.
 
 **Withdraw**
+![WithMomint](https://github.com/user-attachments/assets/584d11d7-bea6-4f50-9555-9e57a4c58198)
+
 When a user wants to get their underlying assets back they will use the following function 
 
 ```solidity
@@ -455,13 +508,38 @@ When a user wants to get their underlying assets back they will use the followin
     ) external
 ```
 
-This function takes the shares they want to burn and the specific project index. This function will follow the same method of grabing the address from the index as per the deposit function. The withdraw function will check all common check exmaple balance of the user to ensure they have shares. Now we will be calling the divest function inside of the module and again this is also part of the module standard. The divest function will go to the module and the module itself will handle all divestments calculations so when we get the amount back we can perform the proper calculations inside the vault. We will be checking to ensure we have enough liqudity inside the vault to ensure we can make the withdraw if there is no liqudity the user will have to come back when liqudity is available. After we made this check we move onto burning of the shares and transfering the underlying assets back to the user. 
+This function allows users to burn their shares from a project and withdraw their underlying vault liquidty token.
+
+Retrieving the Project Module:
+
+The function takes the number of shares the user wants to burn and the project index.
+It retrieves the corresponding contract address for the project, just as in the deposit function.
+
+Validation Checks:
+The function verifies that the user has enough shares to withdraw this is checking the module.
+
+Calling the Divest Function:
+The function calls the divest function on the module.
+Each module follows a standardized structure and manages its own divestment calculations.
+
+Processing the Withdrawal:
+The module determines the amount of underlying liqudity tokens to return.
+Once the vault receives this information, it performs the final calculations.
+
+Liquidity Check:
+The vault ensures that there is enough available liquidity to process the withdrawal.
+If there isn’t sufficient liquidity, the user must wait until more funds become available.
+
+Finalizing the Transaction:
+If liquidity is available, the function burns the user’s shares.
+The corresponding amount of the underlying liquity token is then transferred back to the user.
 
 **Shares Explination**
 In the system, each project is allocated a specific number of shares on creation of their project. For example, if a project is assigned 100 shares, only those 100 share tokens can be sold. When a user invests in that project, they can acquire up to the available 100 shares. This structure renders the total number of shares in the vault irrelevant because, although the vault may contain 300 minted shares, these shares must originate from a project. Therefore, a user can only obtain shares after a project's allocation has been determined.
 
 
 **Distribute and Claim**
+![DistrubuteAndClaimMomint](https://github.com/user-attachments/assets/c6f8fb15-fcef-4acf-b627-32f5dfad1034)
 The distribution system manages how investment returns are distributed to projects through a structured epoch-based mechanism. When an project owner wants to distrubute returns to their share holders they will use the following function 
 
 ```solidity
@@ -471,7 +549,21 @@ function distributeReturns(
     ) external
 ```
 
-This function will first go to the project and get the needed accounting functions. These function will be utilized inside the vault to calculate the distrubution and ensure we follow the 1:1 buy at whole. After this we will create a returns epoch. The epochs are created to ensure fair distribution of returns based on when users held shares, tracks and manage distributions in a organized way, represents a distinct period of returns/revenue distribution. Once the epoch is created users are able to claim on the epoch. The users will use the following function to claim their returns. 
+This function ensures that investment returns are fairly distributed based on share ownership during a specific period.
+
+Retrieving Project Accounting Data:
+
+The function first retrieves the necessary accounting details from the project.
+This data is used inside the vault to calculate distributions while ensuring adherence to the 1:1 whole-share model (only whole shares can be bought or sold).
+Creating a Returns Epoch:
+
+A returns epoch is established to manage and track revenue distribution.
+The epoch ensures fair distribution based on when users held shares.
+It organizes distributions into distinct time periods for structured revenue allocation.
+Claiming Returns:
+
+Once an epoch is created, users become eligible to claim their share of the returns.
+To do so, they use the designated claim function, which verifies eligibility before distributing funds.
 
 ```solidity
  function claimReturns(
@@ -480,7 +572,19 @@ This function will first go to the project and get the needed accounting functio
     ) external
 ```
 
-This function will take the epoch id in which the user wants to claim from and the project in which the epoch belongs to. From here the function will check to ensure that the user hasnt already claimed from this epoch, holds shares inside the project and ensures it follows our dust controll. Once the checks pass the user will receive the underlying asset in the vault as their reward. 
+This function allows users to claim their share of returns from a specific project and epoch.
+
+Selecting the Epoch and Project:
+
+The function takes the epoch ID (the specific distribution period) and the project it belongs to.
+Validation Checks:
+
+Ensures the user has not already claimed from the selected epoch.
+Verifies that the user holds shares in the project.
+Applies dust control measures to prevent insignificant or unnecessary claims.
+Reward Distribution:
+
+If all checks pass, the function releases the user's share of the underlying asset stored in the vault.
 
 **Project Owner Allocation** 
 The vault is designed to autonomously manage its liquidity through multiple channels. One of these channels are deposits. When users deposit funds, these assets increase the vault's liquidity. Now when the vault gets this liqudity it will be partitioned. X percent to the vaults liqudity and X percent allocated to the project owner. Now project owners can claim their sales from the following function. 
@@ -535,6 +639,7 @@ function depositLiqudity(
 ```
 
 This function will record how much liqudity has been added by the vault owner. 
+
 
 
 
