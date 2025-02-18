@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import {ERC4626Upgradeable, IERC20, IERC20Metadata} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
+import {ERC4626Upgradeable, IERC20, IERC20Metadata, ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -106,6 +106,13 @@ contract MomintVault is
         address indexed module,
         bool isSingleProject,
         uint256 indexed index
+    );
+    event EmergencyWithdrawal(address indexed recipient, uint256 amount);
+    event UserTransfer(
+        address indexed from,
+        address indexed to,
+        uint256 amount,
+        uint256 indexed moduleIndex
     );
 
     constructor() {
@@ -331,6 +338,17 @@ contract MomintVault is
         return netAssets;
     }
 
+    // ============ User Transfer Functions ============
+    function userTransfer(address to, uint256 amount, uint256 index) external {
+        if (to == address(0)) revert InvalidReceiver();
+        if (index >= modules.length) revert InvalidModuleIndex();
+        if (amount == 0) revert InvalidAmount();
+        emit UserTransfer(msg.sender, to, amount, index);
+
+        modules[index].module.updateUserInfo(msg.sender, to, amount);
+        _transfer(msg.sender, to, amount);
+    }
+
     // ============ Liquidity Management Functions ============
     function updateLiquidityRatios(
         uint16 newMinLiquidityBP_,
@@ -408,7 +426,7 @@ contract MomintVault is
     function claimReturns(
         uint256 moduleIndex,
         uint256 epochId
-    ) external nonReentrant returns (uint256) {
+    ) public nonReentrant returns (uint256) {
         if (moduleIndex >= modules.length) revert InvalidModuleIndex();
         if (epochId == 0 || epochId > currentEpochId) revert InvalidEpochId();
 
@@ -467,6 +485,11 @@ contract MomintVault is
         allocation.lastReleaseTime = block.timestamp;
 
         IERC20(asset()).safeTransfer(msg.sender, releaseAmount);
+    }
+
+    function setVaultFees(VaultFees calldata newFees_) external onlyOwner {
+        fees = newFees_;
+        feesUpdatedAt = block.timestamp;
     }
 
     // ============ Module Management Functions ============
@@ -631,8 +654,25 @@ contract MomintVault is
                 );
     }
 
-    function setVaultFees(VaultFees calldata newFees_) external onlyOwner {
-        fees = newFees_;
-        feesUpdatedAt = block.timestamp;
+    // ============ Overrides ============
+    function transfer(
+        address to,
+        uint256 amount
+    ) public virtual override(ERC20Upgradeable, IERC20) returns (bool) {
+        revert("Not allowed");
+    }
+
+    function emergencyWithdraw(
+        address recipient_,
+        uint256 amount_
+    ) external onlyOwner whenPaused {
+        if (recipient_ == address(0)) revert InvalidReceiver();
+        if (amount_ == 0) revert InvalidAmount();
+
+        uint256 vaultBalance = IERC20(asset()).balanceOf(address(this));
+        if (amount_ > vaultBalance) revert InsufficientBalance();
+
+        IERC20(asset()).safeTransfer(recipient_, amount_);
+        emit EmergencyWithdrawal(recipient_, amount_);
     }
 }

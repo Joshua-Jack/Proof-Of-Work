@@ -51,6 +51,7 @@ contract SPModule is
     error InvalidOwner();
     error InvalidName();
     error NotVault();
+    error InvalidAddress();
 
     event ModuleInitialized(
         uint256 indexed projectId,
@@ -67,6 +68,13 @@ contract SPModule is
         uint256 indexed projectId,
         uint256 pricePerShare,
         uint256 oldPricePerShare
+    );
+
+    event UserInfoUpdated(
+        address indexed from,
+        address indexed to,
+        uint256 shares,
+        uint256 cost
     );
 
     enum UpdateType {
@@ -220,6 +228,35 @@ contract SPModule is
             tokenURI: project.tokenURI,
             owner: project.owner
         });
+    }
+
+    function updateUserInfo(
+        address user,
+        address to,
+        uint256 amount
+    ) external onlyVault {
+        if (user == address(0) || to == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidAmount();
+
+        UserInvestment storage fromUserInvestment = _userInvestments[user];
+        if (fromUserInvestment.projectShares[_projectId] < amount)
+            revert InsufficientShares();
+
+        // Calculate the proportional cost based on the user's current investment
+        uint256 totalCost = (amount * fromUserInvestment.totalInvested) /
+            fromUserInvestment.totalShares;
+
+        // Update the sender's state (divest)
+        _updateDivestmentState(user, amount, totalCost);
+
+        // Update the receiver's state (invest)
+        _updateInvestmentState(to, amount, totalCost);
+
+        // Update reward debts for both users
+        _updateRewardDebt(user);
+        _updateRewardDebt(to);
+
+        emit UserInfoUpdated(user, to, amount, totalCost);
     }
 
     // === View functions ===

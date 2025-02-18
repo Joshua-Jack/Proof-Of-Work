@@ -86,4 +86,6 @@ interface IMomintVault {
     function unpause() external;
 
     function setFeeRecipient(address newFeeRecipient) external;
+
+    function getVaultInfo() external view returns (VaultInfo memory);
 }

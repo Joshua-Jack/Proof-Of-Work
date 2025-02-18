@@ -136,7 +136,7 @@ contract MomintVaultTests is TestSetup {
         console.log("- New max owner:", currentMaxOwner);
     }
 
-    function test_ReverttransferSharesAndClaim() public {
+    function test_RevertCantTransferShares() public {
         vm.startPrank(admin);
         Module memory singleProjectModule = _createMockModule(admin);
         singleProjectModule.isSingleProject = true;
@@ -166,36 +166,9 @@ contract MomintVaultTests is TestSetup {
         console.log("Share token address:", shareToken);
 
         uint256 sharesToTransfer = shares / 2;
+        vm.expectRevert("Not allowed");
         IERC20(shareToken).transfer(user3, sharesToTransfer);
-        console.log("\nAfter transfer:");
-        console.log("User2 shares:", vault.balanceOf(user2));
-        console.log("User3 shares:", vault.balanceOf(user3));
         vm.stopPrank();
-
-        // Try to claim returns with both users
-        console.log("\nTrying to claim returns:");
-
-        vm.startPrank(user2);
-        try vault.claimReturns(0, 1) returns (uint256 amount) {
-            console.log("User2 claimed amount:", amount);
-        } catch Error(string memory reason) {
-            console.log("User2 claim failed:", reason);
-        }
-        vm.stopPrank();
-
-        vm.startPrank(user3);
-        vm.expectRevert(NoSharesOwned.selector);
-        try vault.claimReturns(0, 1) returns (uint256 amount) {
-            console.log("User3 claimed amount:", amount);
-        } catch Error(string memory reason) {
-            console.log("User3 claim failed:", reason);
-        }
-        vm.stopPrank();
-
-        // Check final USDT balances
-        console.log("\nFinal USDT balances:");
-        console.log("User2 USDT:", USDT.balanceOf(user2));
-        console.log("User3 USDT:", USDT.balanceOf(user3));
     }
 
     function test_ownerAllocation() public {
@@ -827,38 +800,6 @@ contract MomintVaultTests is TestSetup {
         vm.stopPrank();
     }
 
-    function test_RevertWhen_ClaimingWithPartialShares() public {
-        // Setup and initial deposit
-        vm.startPrank(admin);
-        Module memory singleProjectModule = _createMockModule(admin);
-        vault.addModule(singleProjectModule, false, 0);
-        vm.stopPrank();
-
-        // User1 deposits
-        vm.startPrank(user1);
-        USDT.approve(address(vault), 100e6);
-        uint256 shares = vault.deposit(100e6, user1, 0);
-        vm.stopPrank();
-
-        // Distribute returns
-        vm.startPrank(admin);
-        USDT.approve(address(vault), 10e6);
-        vault.distributeReturns(10e6, 0);
-        vm.stopPrank();
-
-        // Transfer half shares and try claims
-        vm.startPrank(user1);
-        vault.transfer(user2, shares / 2);
-
-        uint256 claimAmount = vault.claimReturns(0, 1);
-        assertLt(
-            claimAmount,
-            10e6,
-            "Claim amount should be less than total returns"
-        );
-        vm.stopPrank();
-    }
-
     function test_setVaultFees() public {
         vm.startPrank(admin);
         VaultFees memory newFees = VaultFees({
@@ -1019,5 +960,139 @@ contract MomintVaultTests is TestSetup {
         uint256 shares = 100e6;
         uint256 assets = vault.previewMint(shares);
         assertGt(assets, 0, "Should preview non-zero assets");
+    }
+
+    function test_emergencyWithdraw() public {
+        // Setup initial state
+
+        Module memory singleProjectModule = _createMockModule(admin);
+        vm.startPrank(admin);
+        vault.addModule(singleProjectModule, false, 0);
+
+        // User deposits
+        vm.startPrank(user1);
+        uint256 depositAmount = 100e6; // 100 USDT
+        USDT.approve(address(vault), depositAmount);
+        vault.deposit(depositAmount, user1, 0);
+        vm.stopPrank();
+
+        // Emergency withdrawal
+        vm.startPrank(admin);
+        vault.pause();
+
+        uint256 vaultBalance = USDT.balanceOf(address(vault));
+        uint256 adminInitialBalance = USDT.balanceOf(admin);
+
+        vault.emergencyWithdraw(admin, vaultBalance);
+
+        assertEq(
+            USDT.balanceOf(admin),
+            adminInitialBalance + vaultBalance,
+            "Admin should receive emergency withdrawal"
+        );
+        assertEq(
+            USDT.balanceOf(address(vault)),
+            0,
+            "Vault should have zero balance after emergency withdrawal"
+        );
+        vm.stopPrank();
+    }
+
+    function test_userTransfer() public {
+        // Setup initial state
+
+        Module memory singleProjectModule = _createMockModule(admin);
+        vm.startPrank(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        // User1 deposits
+        vm.startPrank(user1);
+        uint256 depositAmount = 100e6; // 100 USDT
+        USDT.approve(address(vault), depositAmount);
+        uint256 shares = vault.deposit(depositAmount, user1, 0);
+
+        console.log("Initial deposit shares:", shares);
+
+        // Get initial states
+        SPModule module = SPModule(address(singleProjectModule.module));
+        (uint256 initialUser1Shares, uint256 initialUser1Invested, ) = module
+            .getUserInvestment(user1);
+
+        console.log("Initial User1 shares:", initialUser1Shares);
+        console.log("Initial User1 invested:", initialUser1Invested);
+
+        // Transfer half of shares to user2
+        uint256 transferAmount = initialUser1Shares / 2;
+        console.log("Transferring shares:", transferAmount);
+
+        vault.userTransfer(user2, transferAmount, 0);
+
+        // Get final states
+        (uint256 finalUser1Shares, uint256 finalUser1Invested, ) = module
+            .getUserInvestment(user1);
+        (uint256 finalUser2Shares, uint256 finalUser2Invested, ) = module
+            .getUserInvestment(user2);
+
+        console.log("Final User1 shares:", finalUser1Shares);
+        console.log("Final User1 invested:", finalUser1Invested);
+        console.log("Final User2 shares:", finalUser2Shares);
+        console.log("Final User2 invested:", finalUser2Invested);
+
+        // Assertions
+        assertEq(
+            finalUser1Shares,
+            initialUser1Shares - transferAmount,
+            "User1 shares not correctly reduced"
+        );
+
+        assertEq(
+            finalUser2Shares,
+            transferAmount,
+            "User2 shares not correctly received"
+        );
+
+        assertEq(
+            finalUser1Invested,
+            (initialUser1Invested * finalUser1Shares) / initialUser1Shares,
+            "User1 invested amount not correctly reduced"
+        );
+
+        assertEq(
+            finalUser2Invested,
+            (initialUser1Invested * finalUser2Shares) / initialUser1Shares,
+            "User2 invested amount not correctly calculated"
+        );
+
+        // Verify vault token balances
+        assertEq(
+            vault.balanceOf(user1),
+            shares - transferAmount,
+            "User1 vault balance not correctly reduced"
+        );
+
+        assertEq(
+            vault.balanceOf(user2),
+            transferAmount,
+            "User2 vault balance not correctly increased"
+        );
+
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_UserTransferToZeroAddress() public {
+        // Setup
+        vm.startPrank(admin);
+        Module memory singleProjectModule = _createMockModule(admin);
+        vault.addModule(singleProjectModule, false, 0);
+        vm.stopPrank();
+
+        vm.startPrank(user1);
+        USDT.approve(address(vault), 100e6);
+        vault.deposit(100e6, user1, 0);
+
+        vm.expectRevert(InvalidReceiver.selector);
+        vault.userTransfer(address(0), 50e6, 0);
+        vm.stopPrank();
     }
 }

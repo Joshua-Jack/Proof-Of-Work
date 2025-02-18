@@ -57,6 +57,8 @@ interface IModule {
     // Rewards
     function distributeRevenue(uint256 projectId, uint256 amount) external;
 
+    function updateUserInfo(address user, address to, uint256 amount) external;
+
     function getUserReturns(address user) external view returns (uint256);
 
     function getUserShares(address user) external view returns (uint256);

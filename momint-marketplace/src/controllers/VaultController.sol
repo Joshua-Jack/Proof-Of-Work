@@ -6,7 +6,7 @@ import {VaultStorage} from "../storage/VaultStorage.sol";
 import {ModuleStorage} from "../storage/ModuleStorage.sol";
 import {ContractStorage} from "../storage/ContractStorage.sol";
 import {MomintFactory} from "../factories/MomintFactory.sol";
-import {IMomintVault, Module, VaultFees} from "../interfaces/IMomintVault.sol";
+import {IMomintVault, Module, VaultFees, VaultInfo} from "../interfaces/IMomintVault.sol";
 import {IModule} from "../interfaces/IModule.sol";
 import {SPModule} from "../modules/SPModule.sol";
 import {ContractData} from "../interfaces/IContractStorage.sol";
@@ -16,6 +16,7 @@ import {IContractStorage} from "../interfaces/IContractStorage.sol";
 import {IVaultStorage} from "../interfaces/IVaultStorage.sol";
 import {IModuleStorage} from "../interfaces/IModuleStorage.sol";
 import {IMomintFactory} from "../interfaces/IMomintFactory.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract VaultController is AccessControl, ReentrancyGuard {
     bytes32 public constant VAULT_CONTROLLER_ROLE =
@@ -53,6 +54,11 @@ contract VaultController is AccessControl, ReentrancyGuard {
     event VaultUnpaused(address indexed vault);
     event AddingNewContract(bytes32 indexed id, ContractData);
     event RemovingContract(bytes32 indexed id);
+    event EmergencyWithdrawal(
+        address indexed vault,
+        address indexed recipient,
+        uint256 amount
+    );
 
     error UnauthorizedCaller();
     error InvalidAddress();
@@ -67,6 +73,8 @@ contract VaultController is AccessControl, ReentrancyGuard {
     error VaultNotStored();
     error InvalidModuleId();
     error InvalidIndex();
+    error InsufficientLiquidity();
+    error TransferFailed();
 
     constructor(
         address admin,
@@ -245,5 +253,62 @@ contract VaultController is AccessControl, ReentrancyGuard {
         if (vault_ == address(0)) revert InvalidAddress();
         if (index_ == 0) revert InvalidIndex();
         IMomintVault(vault_).removeModule(index_);
+    }
+
+    function emergencyWithdrawVault(
+        address vault_,
+        address recipient_
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
+        if (vault_ == address(0)) revert InvalidAddress();
+        if (recipient_ == address(0)) revert InvalidAddress();
+        VaultInfo memory vaultInfo = IMomintVault(vault_).getVaultInfo();
+        // Get vault's base asset
+        IERC20 baseAsset = vaultInfo.baseAsset;
+        uint256 vaultBalance = baseAsset.balanceOf(vault_);
+
+        if (vaultBalance == 0) revert InsufficientLiquidity();
+
+        // Pause the vault first
+        IMomintVault(vault_).pause();
+
+        // Transfer all funds to recipient
+        bool success = baseAsset.transferFrom(vault_, recipient_, vaultBalance);
+        if (!success) revert TransferFailed();
+
+        emit EmergencyWithdrawal(vault_, recipient_, vaultBalance);
+    }
+
+    function emergencyWithdrawAllVaults(
+        address recipient_
+    ) external onlyRole(VAULT_CONTROLLER_ROLE) {
+        if (recipient_ == address(0)) revert InvalidAddress();
+
+        address[] memory vaults = vaultStorage.getAllVaults();
+        uint256 totalWithdrawn = 0;
+
+        for (uint256 i = 0; i < vaults.length; i++) {
+            address vault = vaults[i];
+            VaultInfo memory vaultInfo = IMomintVault(vault).getVaultInfo();
+            IERC20 baseAsset = vaultInfo.baseAsset;
+            uint256 vaultBalance = baseAsset.balanceOf(vault);
+
+            if (vaultBalance > 0) {
+                // Pause the vault
+                IMomintVault(vault).pause();
+
+                // Transfer funds
+                bool success = baseAsset.transferFrom(
+                    vault,
+                    recipient_,
+                    vaultBalance
+                );
+                if (success) {
+                    totalWithdrawn += vaultBalance;
+                    emit EmergencyWithdrawal(vault, recipient_, vaultBalance);
+                }
+            }
+        }
+
+        if (totalWithdrawn == 0) revert InsufficientLiquidity();
     }
 }
